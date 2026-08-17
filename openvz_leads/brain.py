@@ -19,6 +19,16 @@ DEFAULT_TIMEOUT_SECONDS = 300  # a single Claude call should never hang forever
 DEFAULT_MAX_RETRIES = 2  # retries on transient failures (non-zero exit, timeout)
 RETRY_BASE_DELAY = 5.0  # seconds; doubles per attempt
 
+# Placeholders that are supposed to survive templating.
+#
+# These are per-recipient merge variables: the Writer is told to put them in
+# the copy, and whatever sends the email substitutes them for each prospect.
+# They look identical to a templating mistake, so without this the "unfilled
+# variables" check below fired on every single campaign — which trains you to
+# ignore the warning, and buries the case it exists to catch (a real typo like
+# {{prodcut_name}}, which would otherwise reach Claude verbatim).
+MERGE_VARIABLES = frozenset({"first_name", "company", "title"})
+
 # stderr fragments that indicate retrying is pointless
 _NON_RETRYABLE_PATTERNS = (
     "not logged in",
@@ -216,11 +226,12 @@ class Brain:
             return ""
         for key, value in kwargs.items():
             template = template.replace(f"{{{{{key}}}}}", str(value))
-        # Surface templating mistakes early instead of sending {{foo}} to Claude
-        leftover = re.findall(r"\{\{(\w+)\}\}", template)
+        # Surface templating mistakes early instead of sending {{foo}} to Claude.
+        # Merge variables are excluded — they are meant to still be there.
+        leftover = set(re.findall(r"\{\{(\w+)\}\}", template)) - MERGE_VARIABLES
         if leftover:
             logger.warning(
-                f"Prompt '{prompt_name}' has unfilled variables: {sorted(set(leftover))}"
+                f"Prompt '{prompt_name}' has unfilled variables: {sorted(leftover)}"
             )
         return template
 

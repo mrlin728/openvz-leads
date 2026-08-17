@@ -210,3 +210,44 @@ async def test_closed_prospects_are_never_queued_for_analysis(state):
     )
     await state.update_prospect_status(pid, "opted_out")
     assert await state.get_prospects_needing_profile(min_score=0) == []
+
+
+class TestPromptTemplating:
+    """load_prompt's unfilled-variable check must not cry wolf."""
+
+    def test_merge_variables_do_not_trigger_a_warning(self, caplog, tmp_path):
+        from openvz_leads.brain import Brain
+        from openvz_leads.state import StateManager
+
+        brain = Brain(StateManager(str(tmp_path / "t.db")))
+        with caplog.at_level("WARNING"):
+            filled = brain.load_prompt(
+                "writer",
+                product_name="P", product_description="D", product_benefits="B",
+                product_pricing="$1", persona_name="N", persona_company="C",
+                persona_role="R", persona_tone="T",
+            )
+        assert "{{first_name}}" in filled, "merge variables must survive templating"
+        assert "unfilled variables" not in caplog.text
+
+    def test_a_genuine_typo_still_warns(self, caplog, tmp_path):
+        from openvz_leads.brain import Brain
+        from openvz_leads.state import StateManager
+
+        prompts = tmp_path / "prompts"
+        prompts.mkdir()
+        (prompts / "typo.md").write_text("Sell {{prodcut_name}} to {{first_name}}.")
+
+        import openvz_leads.brain as brain_module
+
+        original = brain_module.PROMPTS_DIR
+        brain_module.PROMPTS_DIR = prompts
+        try:
+            brain = Brain(StateManager(str(tmp_path / "t.db")))
+            with caplog.at_level("WARNING"):
+                brain.load_prompt("typo", product_name="P")
+        finally:
+            brain_module.PROMPTS_DIR = original
+
+        assert "prodcut_name" in caplog.text
+        assert "first_name" not in caplog.text
