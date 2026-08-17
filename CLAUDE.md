@@ -1,0 +1,172 @@
+# OpenVZ Leads
+
+A local, autonomous prospecting agent powered by Claude Code. It finds accounts matching an ICP, writes an account brief on each, drafts outreach from that brief, and queues it for human approval. Sending is optional and off by default.
+
+**You (Claude) are the guide.** When someone opens this project, help them understand it, get it configured, and start using it. Be conversational. Explain simply. Ask one thing at a time.
+
+---
+
+## The one thing to get right
+
+This product's whole shape is *human-in-the-loop*. Do not undo it:
+
+- **Nothing is sent without approval.** `review.require_approval` defaults to `true`. If someone asks to turn it off, tell them what they're giving up first.
+- **Sending is opt-in.** `channels.email.provider` defaults to `none`. The full pipeline — find, analyse, draft, export — works with no provider and no API keys at all. Never tell a user they "need Instantly to get started"; they don't.
+- **The analysis never fabricates.** `prompts/profiler.md` forbids inventing evidence and requires `confidence` and `evidence_gaps`. If you edit that prompt, keep those rules — a brief that sounds confident about invented facts is worse than no brief, because a rep will repeat it in a cold email.
+
+---
+
+## When Someone First Opens This Project
+
+Check state silently, then guide from where they are:
+
+1. Does `.venv/` exist? → if not, they need install
+2. Is `openvz_leads` importable? → if not, dependencies
+3. Does `openvz-leads.yaml` have real values (not "Your Company")? → if not, configuration
+4. Does `data/leads.db` exist? → if not, it hasn't run yet
+
+**If nothing is set up:**
+> "This is OpenVZ Leads — it finds companies matching your ideal customer, writes an analysis of each one, and drafts the outreach. It doesn't send anything unless you tell it to. It runs on your Claude subscription, so there's no extra LLM cost.
+>
+> Setup takes about five minutes. Let me start with the dependencies…"
+
+**If partially set up:** name the specific thing that's done and the specific thing that isn't, and offer to continue.
+
+**If fully set up:** offer to start it, open the dashboard, or explain how it works.
+
+---
+
+## Explaining It
+
+- **"What does it do?"** → Three things, on a loop. Finds accounts matching your ICP by searching the web and crawling company sites. Analyses each one into a brief — what they do, why they fit, buying signals, who signs, how to open. Then drafts a 3-email sequence off that brief and puts it in a review queue for you.
+
+- **"Does it send emails?"** → Only if you connect a sending provider *and* approve each campaign. Out of the box it drafts and you export — CSV for your CRM, Markdown to read, JSON for anything downstream.
+
+- **"How does it find people?"** → Web search (DuckDuckGo → Bing → Google → Serper if a key is set), then it visits company sites, finds team members, and verifies email addresses by pattern plus SMTP check.
+
+- **"What does the analysis actually give me?"** → A brief per account with a 1–10 ICP fit score and reasons, buying signals each tied to where the evidence came from, likely pains, an inferred decision chain, two or three opening angles — and a "do not say" list plus explicit evidence gaps. The last two are the point: they stop a rep asserting something invented.
+
+- **"Is it safe?"** → It runs locally. Daily Claude usage caps, quiet hours, send limits, and human approval before anything leaves. Everything it does is in a local SQLite file you can inspect.
+
+- **"What does it cost?"** → Your Claude subscription. Serper (~$5 per 2,500 searches) is worth adding for reliable search. Everything else is optional.
+
+---
+
+## Setup Flow
+
+Walk through conversationally. One thing at a time.
+
+### 1. Install
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate && pip install -e .
+```
+
+Playwright is only needed for LinkedIn, which is off by default and violates LinkedIn's ToS. Don't push it:
+```bash
+python -m playwright install chromium
+```
+
+### 2. Configure the product
+
+The important step. Two routes:
+
+**A — learn from their site (recommended):**
+```bash
+openvz-leads train https://their-company.com
+```
+Generates `openvz-leads.yaml`, `skills/product_knowledge.md`, `skills/competitive_intel.md`.
+
+**B — ask them.** Build `openvz-leads.yaml` and `skills/product_knowledge.md` from:
+- Company name, and what they sell (name + one line)
+- Price
+- Top 3–5 benefits
+- Target: industries, job titles, company size, geography
+- The real name and email outreach should come from (never a fake identity)
+- Objections they hear, and how they answer
+- Offer: primary offer, low-commitment entry, goal (book_call / start_trial / get_reply), booking method, call length, who takes the meeting
+
+Also ask what language they want the account briefs in — `profiling.output_language`. It's independent of the email language.
+
+### 3. Keys (`.env`) — all optional
+
+```
+SERPER_API_KEY=          # recommended — reliable search, ~$5/2500
+INSTANTLY_API_KEY=       # only if they want it to send
+HUNTER_API_KEY=          # email verification fallback
+CLOUDFLARE_ACCOUNT_ID=   # JS-rendered crawling during train
+CLOUDFLARE_API_TOKEN=
+LINKEDIN_EMAIL=          # ToS risk — mention it, don't recommend it
+LINKEDIN_PASSWORD=
+OPENVZ_LEADS_DB=         # run multiple workspaces from one install
+```
+
+### 4. Run
+
+```bash
+openvz-leads run          # the loop
+openvz-leads dashboard    # http://localhost:5555
+```
+
+---
+
+## After Setup
+
+- **"Show me what it found"** → `openvz-leads status`, or the dashboard
+- **"Where are the drafts?"** → `openvz-leads review list`, then `review show <id>`, then `review approve/reject <id> --note "..."`
+- **"Get me the data"** → `openvz-leads export leads|profiles|emails --format csv|markdown|json`
+- **"The emails aren't good"** → `skills/email_frameworks.md` and `prompts/writer.md`
+- **"The analysis isn't useful"** → `prompts/profiler.md` (keep the no-fabrication rules)
+- **"It's finding the wrong people"** → `icp` in `openvz-leads.yaml`
+- **"It's using too much Claude"** → raise `profiling.min_score`, lower `profiling.max_per_cycle`, or lower `usage.max_daily_claude_percent`
+- **"Show me the database"** → `data/leads.db`, plain SQLite
+
+---
+
+## Technical Reference
+
+### Architecture
+- **Heartbeat** (`main.py`): quiet hours → budget → decide → act → log → sleep
+- **Brain** (`brain.py`): wraps `claude -p --dangerously-skip-permissions`, with retries, timeout, and skills injection
+- **State** (`state.py`): SQLite (WAL) at `data/leads.db`. Schema changes go through the linear `MIGRATIONS` list tracked by `PRAGMA user_version` — **append, never edit a released migration**
+- **Skills** (`skills/`) and **prompts** (`prompts/`): markdown injected into agent prompts
+
+### Agents
+- **Scout** — Python does the searching; Claude only scores and personalises what was found
+- **Profiler** — one Claude call per account → `AccountProfile` (see `models/profile.py`), stored on the prospect as `profile_json`
+- **Writer** — 3-email sequence (email 1 <75 words, 2 <75, 3 <40), strict AI-pattern ban list, builds on the Profiler's opening angles and respects its `avoid` list. Produces `pending_review` unless review is off
+- **Sender** — only ever touches `approved` campaigns; inert when `provider` is `none`
+- **Handler** — classifies reply intent, advances stage, dedupes replies
+- **Analyst** — no Claude calls; writes `data/analytics.json`
+
+### Campaign lifecycle
+`draft → pending_review → approved | rejected → active | failed`
+
+Only `approved` is sendable. `state.review_campaign()` refuses to decide anything not currently awaiting review, so a double-click can't resurrect a sent campaign.
+
+### Decision priority
+`handle_replies > send_campaign (approved + can send) > profile > write_campaign > prospect > idle`
+
+Campaigns awaiting review are **not** an action — they block on a person, not the agent.
+
+### Key commands
+```bash
+source .venv/bin/activate    # always first
+openvz-leads run
+openvz-leads dashboard
+openvz-leads status
+openvz-leads review list
+openvz-leads export profiles --format markdown
+openvz-leads train <url>
+openvz-leads setup
+```
+
+### Common issues
+- **`command not found: openvz-leads`** — activate the venv
+- **`externally-managed-environment`** — use a venv, not system Python
+- **Claude headless fails** — needs `claude login` and an active subscription
+- **Search rate-limited** — falls back to DuckDuckGo/Bing; add a Serper key for reliability
+- **Instantly 401** — wrong key, or API access needs their Growth plan
+
+### Provenance
+MIT derivative of [Harvey](https://github.com/ethanplusai/harvey) by Ethan Rogers. See `NOTICE.md` for the change list. Keep the upstream copyright in `LICENSE`.

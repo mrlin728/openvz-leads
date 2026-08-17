@@ -1,0 +1,90 @@
+# OpenVZ Leads configuration.
+# Run `openvz-leads setup` to fill this in interactively, or
+# `openvz-leads train https://your-site.com` to have it written from your site.
+
+# Who the outreach comes from. Use a real person at a real company —
+# false identities are both illegal in most jurisdictions and the fastest
+# way to get a sending domain blacklisted.
+persona:
+  name: "Your Name"
+  company: "Your Company"
+  role: "Business Development"
+  email: "you@yourcompany.com"
+  linkedin: "linkedin.com/in/your-profile"
+  tone: "professional, consultative, confident"
+
+product:
+  name: "Your Product"
+  description: "Describe what your product does and who it's for"
+  pricing: "Starting at $X/mo"
+  key_benefits:
+    - "Benefit 1"
+    - "Benefit 2"
+    - "Benefit 3"
+  objection_responses:
+    "too expensive": "I understand budget is important. Most of our clients see ROI within 30 days..."
+    "already have a solution": "That makes sense. Curious — what's the one thing you wish it did better?"
+    "not interested": "No worries at all. Mind if I ask what your current approach looks like?"
+  offer:
+    primary: ""                    # Main offer (e.g. "Monthly subscription from $99/mo")
+    entry: ""                      # Low-commitment entry (free trial, free audit…)
+    goal: "book_call"              # book_call, start_trial, get_reply
+    booking_method: "calendar_link" # calendar_link, suggest_times, ask_preference
+    booking_url: ""
+    meeting_duration: "15 minutes"
+    meeting_owner: ""
+
+# Who you want to reach. The Scout searches against this, and the Profiler
+# scores every account against it.
+icp:
+  industries:
+    - "SaaS"
+    - "Marketing Agency"
+  company_size: "10-200 employees"
+  titles:
+    - "VP Marketing"
+    - "Head of Growth"
+    - "CMO"
+    - "Director of Marketing"
+  geography:
+    - "United States"
+
+# ── Human review ──────────────────────────────────────────────────────
+# The safety rail. With require_approval on (the default), campaigns stop
+# in the review queue and nothing is sent until you approve it — in the
+# dashboard, or with `openvz-leads review approve <id>`.
+review:
+  require_approval: true
+  auto_reply: false      # classify replies, but never answer them unattended
+
+# ── Account analysis ──────────────────────────────────────────────────
+# The Profiler spends one Claude call per account to produce a brief:
+# what they do, why they fit, buying signals, decision chain, how to open.
+profiling:
+  enabled: true
+  min_score: 5           # skip accounts the Scout scored below this
+  max_per_cycle: 5       # analyses per heartbeat — controls Claude spend
+  output_language: "English"   # e.g. "简体中文", "日本語". Emails keep their own language.
+  fetch_website: true    # pull the company's own site as evidence
+
+# ── Channels ──────────────────────────────────────────────────────────
+# provider: "none" is draft-only — everything runs, nothing is sent, and
+# you take the results out with `openvz-leads export`. Set it to
+# "instantly" (and add INSTANTLY_API_KEY to .env) to actually send.
+channels:
+  email:
+    enabled: true
+    provider: "none"
+    max_daily_sends: 50
+  linkedin:
+    enabled: false       # automating LinkedIn violates their ToS — see README
+    max_daily_connections: 20
+    max_daily_messages: 10
+
+usage:
+  max_daily_claude_percent: 80
+  heartbeat_interval_minutes: 15
+  quiet_hours:
+    start: "22:00"
+    end: "07:00"
+    timezone: "America/New_York"
