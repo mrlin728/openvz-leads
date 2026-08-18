@@ -77,6 +77,20 @@ jobs:
           Write-Host "Dashboard answered. Workspace seeded:"
           Get-ChildItem $env:OPENVZ_LEADS_HOME | Select-Object -ExpandProperty Name
 
+          # Answering on the port is not the same as being usable. If the
+          # prompts and skills did not make it into the bundle, the agents
+          # silently fall back to terse inline prompts and the build ships
+          # degraded but green. Assert the workspace really was seeded.
+          $missing = @()
+          foreach ($p in @("prompts\writer.md", "prompts\profiler.md",
+                           "skills\email_frameworks.md", "openvz-leads.yaml")) {
+            if (-not (Test-Path "$env:OPENVZ_LEADS_HOME\$p")) { $missing += $p }
+          }
+          if ($missing.Count -gt 0) {
+            throw "Bundled resources missing from the workspace: $($missing -join ', ')"
+          }
+          Write-Host "All expected resources present."
+
       - name: Build the installer
         shell: pwsh
         run: |
