@@ -8,15 +8,16 @@ from pathlib import Path
 
 import yaml
 
+from openvz_leads import paths
 from openvz_leads.brain import Brain
 from openvz_leads.state import StateManager
 
 logger = logging.getLogger("openvz_leads.setup")
 
-PROJECT_ROOT = Path(__file__).parent.parent
-ENV_FILE = PROJECT_ROOT / ".env"
-ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
-CONFIG_FILE = PROJECT_ROOT / "openvz-leads.yaml"
+PROJECT_ROOT = paths.workspace()
+ENV_FILE = paths.env_file()
+ENV_EXAMPLE = paths.bundle_root() / ".env.example"
+CONFIG_FILE = paths.config_file()
 
 
 def _say(message: str):

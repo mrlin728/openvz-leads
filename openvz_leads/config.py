@@ -9,6 +9,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError, field_validator
 
+from openvz_leads import paths as _paths
+
 logger = logging.getLogger("openvz_leads.config")
 
 
@@ -281,7 +283,7 @@ def _find_config_file() -> str:
     candidates = [
         Path.cwd() / "openvz-leads.yaml",
         Path.cwd().parent / "openvz-leads.yaml",
-        Path(__file__).parent.parent / "openvz-leads.yaml",
+        _paths.config_file(),
     ]
     for path in candidates:
         if path.exists():

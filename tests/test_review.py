@@ -230,24 +230,69 @@ class TestPromptTemplating:
         assert "{{first_name}}" in filled, "merge variables must survive templating"
         assert "unfilled variables" not in caplog.text
 
-    def test_a_genuine_typo_still_warns(self, caplog, tmp_path):
+    def test_a_genuine_typo_still_warns(self, caplog, tmp_path, monkeypatch):
+        """The check still has to catch the case it exists for."""
         from openvz_leads.brain import Brain
         from openvz_leads.state import StateManager
 
+        # Point the whole workspace at a temp dir — the same override a
+        # frozen build and a multi-workspace install use.
+        monkeypatch.setenv("OPENVZ_LEADS_HOME", str(tmp_path))
         prompts = tmp_path / "prompts"
         prompts.mkdir()
         (prompts / "typo.md").write_text("Sell {{prodcut_name}} to {{first_name}}.")
 
-        import openvz_leads.brain as brain_module
-
-        original = brain_module.PROMPTS_DIR
-        brain_module.PROMPTS_DIR = prompts
-        try:
-            brain = Brain(StateManager(str(tmp_path / "t.db")))
-            with caplog.at_level("WARNING"):
-                brain.load_prompt("typo", product_name="P")
-        finally:
-            brain_module.PROMPTS_DIR = original
+        brain = Brain(StateManager(str(tmp_path / "t.db")))
+        with caplog.at_level("WARNING"):
+            brain.load_prompt("typo", product_name="P")
 
         assert "prodcut_name" in caplog.text
         assert "first_name" not in caplog.text
+
+
+class TestWorkspaceResolution:
+    """paths.workspace() is what makes the app installable anywhere."""
+
+    def test_env_override_wins(self, tmp_path, monkeypatch):
+        from openvz_leads import paths
+
+        monkeypatch.setenv("OPENVZ_LEADS_HOME", str(tmp_path))
+        assert paths.workspace() == tmp_path
+        assert paths.prompts_dir() == tmp_path / "prompts"
+        assert paths.config_file() == tmp_path / "openvz-leads.yaml"
+
+    def test_checkout_resolves_beside_the_package(self, monkeypatch):
+        """Unpacked-archive users must see no behaviour change."""
+        from pathlib import Path
+
+        from openvz_leads import paths
+
+        monkeypatch.delenv("OPENVZ_LEADS_HOME", raising=False)
+        expected = Path(paths.__file__).resolve().parent.parent
+        assert paths.workspace() == expected
+
+    def test_seeding_copies_editable_files_without_clobbering(self, tmp_path, monkeypatch):
+        from openvz_leads import paths
+
+        source = tmp_path / "bundle"
+        (source / "prompts").mkdir(parents=True)
+        (source / "skills").mkdir()
+        (source / "prompts" / "writer.md").write_text("shipped")
+        (source / "prompts" / "scout.md").write_text("shipped")
+        (source / "openvz-leads.yaml").write_text("shipped")
+
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "prompts").mkdir()
+        (ws / "prompts" / "writer.md").write_text("MINE")
+
+        monkeypatch.setenv("OPENVZ_LEADS_HOME", str(ws))
+        monkeypatch.setattr(paths, "bundle_root", lambda: source)
+
+        paths.ensure_workspace()
+
+        # An edited prompt survives; a new one arrives.
+        assert (ws / "prompts" / "writer.md").read_text() == "MINE"
+        assert (ws / "prompts" / "scout.md").read_text() == "shipped"
+        assert (ws / "openvz-leads.yaml").read_text() == "shipped"
+        assert (ws / "data").is_dir()

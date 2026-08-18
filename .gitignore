@@ -41,3 +41,7 @@ Thumbs.db
 
 # Internal context (not for public repo)
 .context.md
+
+# PyInstaller build output
+build/
+dist/

@@ -33,7 +33,9 @@ def _default_db_path() -> Path:
     override = os.getenv("OPENVZ_LEADS_DB", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(__file__).parent.parent / "data" / "leads.db"
+    from openvz_leads import paths
+
+    return paths.data_dir() / "leads.db"
 
 
 DB_PATH = _default_db_path()

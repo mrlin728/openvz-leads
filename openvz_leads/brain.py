@@ -7,12 +7,13 @@ import re
 import uuid
 from pathlib import Path
 
+from openvz_leads import paths
 from openvz_leads.state import StateManager
 
 logger = logging.getLogger("openvz_leads.brain")
 
-PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-SKILLS_DIR = Path(__file__).parent.parent / "skills"
+# Resolved lazily through paths.workspace() so a frozen build reads the
+# user's editable copies rather than the read-only ones inside the bundle.
 
 # Subprocess safety limits
 DEFAULT_TIMEOUT_SECONDS = 300  # a single Claude call should never hang forever
@@ -215,7 +216,7 @@ class Brain:
 
     def load_prompt(self, prompt_name: str, **kwargs) -> str:
         """Load a prompt template from the prompts/ directory and fill in variables."""
-        prompt_file = PROMPTS_DIR / f"{prompt_name}.md"
+        prompt_file = paths.prompts_dir() / f"{prompt_name}.md"
         try:
             template = prompt_file.read_text()
         except FileNotFoundError:
@@ -237,7 +238,7 @@ class Brain:
 
     def load_skill(self, skill_name: str) -> str:
         """Load a skill knowledge file from the skills/ directory."""
-        skill_file = SKILLS_DIR / f"{skill_name}.md"
+        skill_file = paths.skills_dir() / f"{skill_name}.md"
         try:
             return skill_file.read_text()
         except FileNotFoundError:

@@ -288,7 +288,9 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
 def _needs_setup() -> bool:
     """Check if OpenVZ Leads needs first-time setup."""
     from pathlib import Path
-    project_root = Path(__file__).parent.parent
+    from openvz_leads import paths
+
+    project_root = paths.workspace()
     env_file = project_root / ".env"
     config_file = project_root / "openvz-leads.yaml"
 
