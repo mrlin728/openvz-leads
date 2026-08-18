@@ -80,9 +80,23 @@ jobs:
       - name: Build the installer
         shell: pwsh
         run: |
-          # Inno Setup is not guaranteed on the runner image; install it.
-          choco install innosetup --no-progress -y
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $inno = "C:\Program Files (x86)\Inno Setup 6"
+          $iscc = "$inno\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+
+          # Simplified Chinese is an *unofficial* Inno Setup translation and is
+          # not in the shipped Languages folder, so the compile fails on the
+          # include unless we fetch it. Taken from the upstream source repo.
+          $zh = "$inno\Languages\ChineseSimplified.isl"
+          if (-not (Test-Path $zh)) {
+            Invoke-WebRequest -UseBasicParsing `
+              -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_5_0/Files/Languages/Unofficial/ChineseSimplified.isl" `
+              -OutFile $zh
+            Write-Host "Fetched ChineseSimplified.isl"
+          }
+
           & $iscc /Qp "packaging\windows-installer.iss" /O"$PWD\dist-installer"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
           Get-ChildItem dist-installer
