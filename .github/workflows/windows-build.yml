@@ -1,0 +1,112 @@
+# Windows build — produces the OpenVZ Leads x64 installer on a native
+# windows-latest runner.
+#
+# It has to run here rather than on a developer machine: PyInstaller freezes
+# whatever interpreter it is running under, so a Windows executable can only
+# be produced on Windows. The macOS .dmg is built the same way on a Mac.
+#
+# The installer is unsigned — we have no code-signing certificate — so
+# SmartScreen warns once on first run. Publishing the build from a public
+# runner over public source at least makes the artefact auditable.
+name: Windows Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Attach the installer to this release tag (blank = artefact only)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows installer (x64, unsigned)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the project
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e .
+          pip install "pyinstaller>=6.0"
+
+      - name: Sanity-check the package before freezing it
+        run: |
+          pip install "pytest>=8,<9" "pytest-asyncio>=0.23,<1"
+          python -m pytest -q
+
+      - name: Freeze with PyInstaller
+        run: pyinstaller --noconfirm --clean OpenVZ-Leads.spec
+
+      # A frozen build that cannot start is worse than no build, and the
+      # failure modes here (a missing hidden import, a data file that did not
+      # get bundled) only show up at runtime. Start it, wait for the
+      # dashboard to answer, then stop it.
+      - name: Smoke-test the frozen app
+        shell: pwsh
+        run: |
+          $env:OPENVZ_LEADS_HOME = "$env:RUNNER_TEMP\ovz-smoke"
+          $exe = ".\dist\OpenVZ Leads\OpenVZ Leads.exe"
+          $proc = Start-Process -FilePath $exe -PassThru
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:5555/api/setup-status" `
+                                     -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) {
+            Write-Host "--- app log ---"
+            Get-Content "$env:OPENVZ_LEADS_HOME\data\app.log" -ErrorAction SilentlyContinue
+            throw "The frozen app never served the dashboard."
+          }
+          Write-Host "Dashboard answered. Workspace seeded:"
+          Get-ChildItem $env:OPENVZ_LEADS_HOME | Select-Object -ExpandProperty Name
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          # Inno Setup is not guaranteed on the runner image; install it.
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc /Qp "packaging\windows-installer.iss" /O"$PWD\dist-installer"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          Get-ChildItem dist-installer
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem "dist-installer\*.exe" | Select-Object -First 1
+          $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+          "$h  $($f.Name)" | Out-File -Encoding ascii "$($f.FullName).sha256"
+          Write-Host "$h  $($f.Name)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist-installer/*
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ inputs.release_tag }}"
+          if (-not $tag) { $tag = "${{ github.ref_name }}" }
+          gh release upload $tag (Get-ChildItem "dist-installer\*").FullName --clobber --repo ${{ github.repository }}
