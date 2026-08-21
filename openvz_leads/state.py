@@ -13,7 +13,7 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -51,6 +51,38 @@ def _new_id() -> str:
 def _utcnow() -> datetime:
     """Naive UTC now (matches how timestamps are stored in the DB)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def local_day_bounds_utc(now: datetime | None = None) -> tuple[str, str]:
+    """The current local day, expressed as the UTC range the DB stores.
+
+    Timestamps are written as naive UTC. "Today" to a person is their local
+    day. Comparing the two directly — `DATE(sent_at) = date.today()` — is
+    wrong by the UTC offset, and wrong in a way that hides: east of UTC the
+    two strings simply never match for the last hours of the local day, so a
+    daily *send cap* silently counted zero and stopped capping anything.
+
+    Returned as ISO strings so they compare correctly against the stored
+    values, which are ISO strings too.
+    """
+    # An aware `now` brings its own idea of local with it, which is what
+    # makes this testable from any machine. Without that the function would
+    # always use the host's timezone, and a test asserting UTC behaviour
+    # would pass or fail depending on where it ran — worse than no test.
+    if now is None:
+        local_now = datetime.now().astimezone()
+    elif now.tzinfo is None:
+        local_now = now.astimezone()
+    else:
+        local_now = now
+
+    start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    # A day later in *local* terms, so a DST transition does not gain or lose
+    # an hour of sending budget.
+    end_local = start_local + timedelta(days=1)
+    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_utc.isoformat(), end_utc.isoformat()
 
 
 def _norm(value: str | None) -> str:
@@ -727,11 +759,12 @@ class StateManager:
         not a new contact, and a cap that ignores follow-ups is a cap that
         lets a mailbox send three times what it was told to.
         """
-        today = date.today().isoformat()
+        start, end = local_day_bounds_utc()
         async with self._connect() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM outbox WHERE status = 'sent' AND DATE(sent_at) = ?",
-                (today,),
+                """SELECT COUNT(*) FROM outbox
+                   WHERE status = 'sent' AND sent_at >= ? AND sent_at < ?""",
+                (start, end),
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else 0

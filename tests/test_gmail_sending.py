@@ -428,6 +428,140 @@ class TestConfigGuards:
         assert GmailConfig().can_detect_replies
 
 
+# ── Failures that only show up on a real backlog or a real clock ──
+
+
+@pytest.mark.asyncio
+class TestSequenceIntegrity:
+    async def test_a_follow_up_is_not_sent_when_the_first_email_never_was(
+        self, state, prospect_id
+    ):
+        """Step two's copy refers to a message this person never received.
+
+        If step one exhausted its retries, step two is not a follow-up — it
+        is a cold email opening with "just following up". Sending it would
+        also leave the prospect at 'queued' while having been emailed, since
+        only step one records contact.
+        """
+        import aiosqlite
+
+        config = make_config()
+        gmail = FakeGmail()
+        sender = make_sender(state, config, gmail)
+        await sender._schedule_campaign(await make_campaign(state, prospect_id))
+
+        async with aiosqlite.connect(state.db_path) as db:
+            await db.execute(
+                "UPDATE outbox SET status='failed', reason='gave up' WHERE step = 1"
+            )
+            await db.commit()
+
+        await _make_everything_due(state)
+        await sender._flush_outbox(gmail)
+
+        assert gmail.sent == [], "sent a follow-up to an email that never went out"
+        assert await state.count_pending_outbox() == 0
+
+    async def test_one_failure_does_not_burn_the_whole_sequence(
+        self, state, prospect_id
+    ):
+        """A single bad pass must not consume every retry the sequence had.
+
+        Without a per-prospect guard, a failure on step one walks straight on
+        to steps two and three in the same pass — three attempts in a few
+        seconds, and the sequence is dead before the transient problem has
+        had a chance to clear.
+        """
+        config = make_config()
+        gmail = FakeGmail(send_error=gmail_api.GmailError("502 upstream"))
+        sender = make_sender(state, config, gmail)
+        await sender._schedule_campaign(await make_campaign(state, prospect_id))
+
+        await _make_everything_due(state)
+        await sender._flush_outbox(gmail)
+
+        rows = await _outbox_rows(state)
+        assert sum(row["attempts"] for row in rows) == 1
+
+    async def test_giving_up_on_the_first_email_clears_the_queue_now(
+        self, state, prospect_id
+    ):
+        """Rather than leaving rows that look scheduled but never can be."""
+        config = make_config()
+        gmail = FakeGmail(send_error=gmail_api.GmailError("hard fail"))
+        sender = make_sender(state, config, gmail)
+        await sender._schedule_campaign(await make_campaign(state, prospect_id))
+
+        for _ in range(3):  # exhaust MAX_SEND_ATTEMPTS
+            await _make_everything_due(state)
+            await sender._flush_outbox(gmail)
+
+        statuses = {row["step"]: row["status"] for row in await _outbox_rows(state)}
+        assert statuses[1] == "failed"
+        assert statuses[2] == "cancelled" and statuses[3] == "cancelled"
+
+
+class TestLocalDayBounds:
+    """The daily cap has to mean the user's day, not UTC's.
+
+    Timestamps are stored as naive UTC and "today" is local. Comparing them
+    directly is wrong by the offset — and east of UTC the two simply stop
+    matching partway through the local day, so the count returns zero and the
+    cap stops capping. That failure is invisible on a UTC machine, which is
+    why this tests the function rather than the clock.
+    """
+
+    def test_bounds_are_local_midnight_expressed_in_utc(self):
+        from datetime import datetime, timedelta, timezone
+
+        from openvz_leads.state import local_day_bounds_utc
+
+        # 01:00 on the 22nd, eight hours ahead of UTC: the local day began at
+        # 16:00 UTC on the 21st.
+        tz = timezone(timedelta(hours=8))
+        now = datetime(2026, 8, 22, 1, 0, tzinfo=tz)
+        start, end = local_day_bounds_utc(now)
+        assert start == "2026-08-21T16:00:00"
+        assert end == "2026-08-22T16:00:00"
+
+    def test_a_utc_machine_gets_plain_midnight(self):
+        from datetime import datetime, timezone
+
+        from openvz_leads.state import local_day_bounds_utc
+
+        now = datetime(2026, 8, 22, 1, 0, tzinfo=timezone.utc)
+        start, end = local_day_bounds_utc(now)
+        assert start == "2026-08-22T00:00:00"
+        assert end == "2026-08-23T00:00:00"
+
+
+@pytest.mark.asyncio
+async def test_the_daily_cap_holds_wherever_the_machine_is(state):
+    """The functional half: this fails east of UTC before the fix."""
+    config = make_config()
+    config.channels.email.max_daily_sends = 2
+    gmail = FakeGmail()
+    sender = make_sender(state, config, gmail)
+
+    for index in range(4):
+        prospect_id = await state.add_prospect(
+            Prospect(
+                first_name=f"P{index}", last_name="X", title="Owner",
+                email=f"p{index}@x.test", company="Co", status="queued",
+            )
+        )
+        await sender._schedule_campaign(
+            await make_campaign(state, prospect_id, steps=1)
+        )
+
+    await sender._flush_outbox(gmail)
+    assert len(gmail.sent) == 2
+    assert await state.count_outbox_sent_today() == 2
+
+    await sender._flush_outbox(gmail)
+    assert len(gmail.sent) == 2, "the cap did not hold on a second pass"
+
+
 # ── The upgrade path ──
 
 
@@ -486,6 +620,15 @@ async def test_an_existing_database_gains_the_outbox_without_losing_anything(tmp
 
 
 # ── Helper ──
+
+
+async def _outbox_rows(state):
+    import aiosqlite
+
+    async with aiosqlite.connect(state.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM outbox ORDER BY step") as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
 
 
 async def _make_everything_due(state):

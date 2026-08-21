@@ -268,17 +268,19 @@ class Sender:
         footer = self.config.channels.email.gmail.footer.render()
 
         sent = 0
-        # At most one message per person per pass. Overdue steps all become
-        # due at the same instant after any outage, and the schedule alone
-        # would then fire them back to back.
-        served: set[str] = set()
+        # One attempt per person per pass — and one *attempt*, not one
+        # success. Overdue steps all become due at the same instant after an
+        # outage, so without this a single failure would walk straight on to
+        # that prospect's step 2 and step 3 in the same pass, burning every
+        # retry the sequence had in a few seconds.
+        attempted: set[str] = set()
         for row in due:
-            if row["prospect_id"] in served:
+            if row["prospect_id"] in attempted:
                 continue
+            attempted.add(row["prospect_id"])
             try:
                 if await self._send_one(client, row, sender_name, footer):
                     sent += 1
-                    served.add(row["prospect_id"])
             except gmail_api.GmailNotAuthorised as e:
                 # Every remaining row would fail the same way. Stop rather
                 # than burning attempts on all of them.
@@ -312,6 +314,24 @@ class Sender:
 
         anchor = await self.state.get_thread_anchor(row["campaign_id"], prospect.id)
 
+        # A follow-up needs something to follow up on. If the first email
+        # never went out — it exhausted its retries, or was cancelled over a
+        # missing merge value — then step two is not a follow-up, it is a
+        # cold email whose copy refers to a message this person never
+        # received. Sending it would also leave them at 'queued' while
+        # having been emailed, because only step one records contact.
+        if int(row["step"]) > 1 and anchor is None:
+            cancelled = await self.state.cancel_outbox_for_prospect(
+                prospect.id,
+                "The first email never went out, so there is nothing to "
+                "follow up on.",
+            )
+            logger.warning(
+                f"Sender: dropped {cancelled} queued follow-up(s) for "
+                f"{prospect.email} — step 1 was never sent."
+            )
+            return False
+
         # The check this whole feature exists to get right.
         if int(row["step"]) > 1 and anchor:
             try:
@@ -341,6 +361,14 @@ class Sender:
             reason = "Not sent — " + "; ".join(blockers)
             await self.state.mark_outbox_failed(row["id"], reason)
             logger.warning(f"Sender: {prospect.email}: {reason}")
+            if int(row["step"]) == 1:
+                # The later steps use the same variables and would fail the
+                # same way. Drop them now rather than three times over.
+                await self.state.cancel_outbox_for_prospect(
+                    prospect.id,
+                    "The first email could not be written for this prospect, "
+                    "so the rest of the sequence was dropped.",
+                )
             return False
 
         try:
@@ -361,6 +389,20 @@ class Sender:
                     row["id"], f"gave up after {attempts} attempts: {e}"
                 )
                 logger.error(f"Sender: giving up on {prospect.email}: {e}")
+                if int(row["step"]) == 1:
+                    # Nothing behind this can happen now. Cancel it here so
+                    # the queue tells the truth today, rather than looking
+                    # scheduled until each step comes due and is dropped.
+                    dropped = await self.state.cancel_outbox_for_prospect(
+                        prospect.id,
+                        "The first email could not be sent, so the rest of "
+                        "the sequence was dropped.",
+                    )
+                    if dropped:
+                        logger.info(
+                            f"Sender: dropped {dropped} queued follow-up(s) "
+                            f"for {prospect.email}."
+                        )
             else:
                 await self.state.defer_outbox(
                     row["id"], _utcnow() + RETRY_AFTER, str(e)
@@ -621,13 +663,23 @@ class Sender:
         )
 
     async def _count_sends_today(self) -> int:
-        """Count how many prospects were contacted today."""
+        """How many prospects were contacted today, in the user's own day.
+
+        `updated_at` is naive UTC and "today" is local, so the two were being
+        compared across an offset — which east of UTC means the strings stop
+        matching partway through the local day, the count returns zero, and
+        the daily cap quietly stops capping. See state.local_day_bounds_utc.
+        """
         import aiosqlite
-        today = date.today().isoformat()
+
+        from openvz_leads.state import local_day_bounds_utc
+
+        start, end = local_day_bounds_utc()
         async with aiosqlite.connect(self.state.db_path) as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM prospects WHERE status = 'contacted' AND updated_at LIKE ?",
-                (f"{today}%",),
+                """SELECT COUNT(*) FROM prospects
+                   WHERE status = 'contacted' AND updated_at >= ? AND updated_at < ?""",
+                (start, end),
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else 0
