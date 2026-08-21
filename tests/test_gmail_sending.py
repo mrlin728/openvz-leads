@@ -428,6 +428,63 @@ class TestConfigGuards:
         assert GmailConfig().can_detect_replies
 
 
+# ── The upgrade path ──
+
+
+@pytest.mark.asyncio
+async def test_an_existing_database_gains_the_outbox_without_losing_anything(tmp_path):
+    """v1.1.0 → v1.2.0, on a database with data already in it.
+
+    Migrations only ever fail on somebody's real, populated database, which
+    is the latest and most expensive moment to find out. Applying the old
+    schema and then upgrading it costs a millisecond here.
+    """
+    import sqlite3
+
+    from openvz_leads import state as state_module
+
+    path = str(tmp_path / "upgrade.db")
+    manager = StateManager(path)
+
+    original = state_module.MIGRATIONS[:]
+    try:
+        # Everything up to and including v4 — the schema v1.1.0 shipped.
+        state_module.MIGRATIONS[:] = original[:4]
+        await manager.init_db()
+    finally:
+        state_module.MIGRATIONS[:] = original
+
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert not db.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'outbox'"
+        ).fetchone()
+
+    prospect_id = await manager.add_prospect(
+        Prospect(first_name="Lena", last_name="F", title="Owner", email="l@x.test")
+    )
+
+    await manager.init_db()  # the upgrade
+
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == len(original)
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name = 'uq_outbox_step'"
+        ).fetchone(), "the double-send guard did not survive the upgrade"
+
+    assert (await manager.get_prospect(prospect_id)).first_name == "Lena"
+
+    from openvz_leads.state import _utcnow
+
+    row = [{
+        "campaign_id": "c", "prospect_id": prospect_id, "step": 1,
+        "subject": "s", "body": "b", "send_after": _utcnow().isoformat(),
+    }]
+    assert await manager.schedule_outbox(row) == 1
+    assert await manager.schedule_outbox(row) == 0
+
+
 # ── Helper ──
 
 
