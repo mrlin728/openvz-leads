@@ -3,8 +3,10 @@
 import logging
 from datetime import datetime
 
+from openvz_leads import pipeline
 from openvz_leads.brain import Brain
 from openvz_leads.config import LeadsConfig, EnvConfig
+from openvz_leads.integrations.crm import CrmSync
 from openvz_leads.integrations.instantly import InstantlyClient
 from openvz_leads.models.conversation import Conversation, Message
 from openvz_leads.state import StateManager
@@ -77,6 +79,9 @@ class Handler:
         self.state = state
         self.config = config
         self.instantly = InstantlyClient(env.instantly_api_key)
+        # Replies are where the interesting stages happen — replied, lost,
+        # opted_out — so this is the agent a CRM most wants to hear from.
+        self.crm = CrmSync(config.crm, env)
         self.skills = ""
 
     async def run(self):
@@ -160,7 +165,10 @@ class Handler:
             return
 
         # Update prospect status
-        await self.state.update_prospect_status(prospect.id, "replied")
+        await pipeline.advance(
+            self.state, prospect.id, "replied",
+            reason="They answered", actor="handler", crm=self.crm,
+        )
 
         # 1. Classify intent. Hard keyword checks run FIRST and override
         # the LLM — opt-outs and legal threats must never be missed.
@@ -212,7 +220,10 @@ class Handler:
         if intent == "unsubscribe":
             # Honor opt-outs ALWAYS. No reply, no future contact.
             await self.state.update_conversation(convo.id, status="closed", stage="closed_lost")
-            await self.state.update_prospect_status(prospect.id, "opted_out")
+            await pipeline.advance(
+                self.state, prospect.id, "opted_out",
+                reason="Asked not to be contacted", actor="handler", crm=self.crm,
+            )
             await self.state.log_action(
                 action_type="opt_out",
                 agent="handler",
@@ -239,7 +250,10 @@ class Handler:
 
         if intent == "not_interested":
             await self.state.update_conversation(convo.id, status="closed", stage="closed_lost")
-            await self.state.update_prospect_status(prospect.id, "lost")
+            await pipeline.advance(
+                self.state, prospect.id, "lost",
+                reason="Said they are not interested", actor="handler", crm=self.crm,
+            )
             logger.info(f"Handler: {lead_email} not interested. Closing. One no is enough.")
             return
 

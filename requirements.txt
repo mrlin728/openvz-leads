@@ -13,3 +13,10 @@ pydantic>=2.5,<3
 pytz>=2024.1
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
+
+# Optional page-reading tiers. Uncomment, or install the extras:
+#   pip install "openvz-leads[crawl]"    # crawl4ai — JS rendering, Markdown
+#   pip install "openvz-leads[browser]"  # browser-use — a real browser
+# With neither, the crawler uses httpx + BeautifulSoup and says so.
+# crawl4ai>=0.4,<1
+# browser-use>=0.1,<1

@@ -79,6 +79,65 @@ def cmd_train(args):
     asyncio.run(trainer.train(url, max_pages=args.max_pages))
 
 
+def cmd_target(args):
+    """Set the ICP from a sentence: `openvz-leads target "find US dental clinics"`."""
+    from openvz_leads.config import (
+        ConfigError, _find_config_file, load_config, load_env,
+    )
+    from openvz_leads.icp import apply_to_file, parse_request
+    from openvz_leads.state import StateManager
+
+    request = " ".join(args.request).strip()
+    if not request:
+        print("\n  Say what you're looking for, e.g.:")
+        print('    openvz-leads target "dental clinics in California, 5-50 staff"\n')
+        sys.exit(2)
+
+    try:
+        config_path = _find_config_file()
+        config = load_config(config_path)
+    except ConfigError as e:
+        print(f"\n  {e}\n")
+        sys.exit(1)
+
+    async def _target():
+        from openvz_leads.brain import Brain
+
+        state = StateManager()
+        await state.init_db()
+        brain = Brain(state, config.model, load_env())
+
+        ready, why = brain.readiness()
+        if not ready:
+            print(f"\n  {why}")
+            print("  Parsing without a model — the result will be rough.\n")
+            brain = None
+        else:
+            print(f"\n  Reading your request with {brain.describe()}...")
+
+        draft = await parse_request(brain, request, current=config.icp)
+        print()
+        print("  " + draft.describe().replace("\n", "\n  "))
+        print()
+
+        if not draft.is_usable():
+            print("  That didn't come out searchable. Try naming the kind of")
+            print("  business directly, e.g. \"dental clinics in California\".\n")
+            sys.exit(1)
+
+        if not args.yes:
+            answer = input("  Save this as your ICP? [Y/n] ").strip().lower()
+            if answer in ("n", "no"):
+                print("  Left your ICP alone.\n")
+                return
+
+        written = apply_to_file(draft, config_path)
+        print(f"\n  Saved to {written}")
+        print("  Start looking with: openvz-leads run\n")
+
+    asyncio.run(_target())
+
+
 def cmd_dashboard(args):
     """Launch the local web dashboard."""
     from openvz_leads.dashboard import start_dashboard
@@ -113,6 +172,89 @@ def cmd_status(args):
         print()
 
     asyncio.run(_status())
+
+
+def cmd_stage(args):
+    """Move a prospect through the pipeline, or show where everyone is."""
+    from openvz_leads import pipeline
+    from openvz_leads.config import ConfigError, load_config, load_env
+    from openvz_leads.integrations.crm import CrmSync
+    from openvz_leads.state import StateManager
+
+    async def _stage():
+        state = StateManager()
+        await state.init_db()
+
+        try:
+            config = load_config()
+            crm = CrmSync(config.crm, load_env())
+        except (ConfigError, Exception):
+            # Moving a record must not require a readable config — the whole
+            # point of this command is that a person can correct the pipeline
+            # by hand, including when something else is broken.
+            crm = None
+
+        if not args.prospect_id:
+            counts = await state.count_prospects_by_stage()
+            print("\n  Pipeline")
+            print("  " + "=" * 52)
+            width = max(len(s) for s in pipeline.STAGES)
+            for name in pipeline.STAGES:
+                count = counts.get(name, 0)
+                bar = "█" * min(count, 30)
+                print(f"  {name.ljust(width)}  {str(count).rjust(4)}  {bar}")
+            print()
+            print("  Move one with: openvz-leads stage <id> meeting --note '...'")
+            print()
+            return
+
+        if not args.stage:
+            prospect = await state.get_prospect(args.prospect_id)
+            if prospect is None:
+                print(f"\n  No prospect with id {args.prospect_id}.\n")
+                sys.exit(1)
+            current = pipeline.normalize(prospect.status)
+            print(f"\n  {prospect.full_name() or args.prospect_id} — {current}")
+            print(f"  {pipeline.DESCRIPTIONS.get(current, '')}\n")
+            history = await state.get_stage_history(args.prospect_id)
+            if history:
+                for event in history:
+                    line = f"  {event['created_at']}  {event['from_stage']} → {event['to_stage']}"
+                    if event.get("reason"):
+                        line += f"  ({event['reason']})"
+                    print(line)
+                print()
+            return
+
+        target = pipeline.normalize(args.stage)
+        if target != args.stage.strip().lower() and args.stage.strip().lower() not in pipeline.STAGES:
+            print(f"\n  '{args.stage}' is not a stage. Use one of:")
+            for name in pipeline.STAGES:
+                print(f"    {name.ljust(11)} {pipeline.DESCRIPTIONS[name]}")
+            print()
+            sys.exit(2)
+
+        moved = await pipeline.advance(
+            state,
+            args.prospect_id,
+            target,
+            reason=args.note,
+            actor="human",
+            crm=crm,
+            force=args.force,
+        )
+        if not moved:
+            print(
+                "\n  Not moved — see the reason above. "
+                "Use --force if you're correcting a mistake.\n"
+            )
+            sys.exit(1)
+        print(f"\n  Moved to {target}.")
+        if crm is not None and crm.enabled and crm.wants(target):
+            print(f"  Told the CRM ({crm.describe()}).")
+        print()
+
+    asyncio.run(_stage())
 
 
 def cmd_export(args):
@@ -251,6 +393,23 @@ def main():
     )
     sub.set_defaults(func=cmd_train)
 
+    # openvz-leads target "<what you're looking for>"
+    sub = subparsers.add_parser(
+        "target",
+        help="Set who to look for, in your own words",
+        description=(
+            "Turn a sentence into an ICP and save it. Shows you what it "
+            "inferred before writing anything."
+        ),
+    )
+    # nargs="+" so the quotes are optional: a request typed without them is
+    # still one request, not an argparse error.
+    sub.add_argument("request", nargs="+", help='e.g. "dental clinics in California"')
+    sub.add_argument(
+        "--yes", "-y", action="store_true", help="Save without confirming"
+    )
+    sub.set_defaults(func=cmd_target)
+
     # openvz-leads dashboard
     sub = subparsers.add_parser("dashboard", help="Open the web dashboard")
     sub.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
@@ -277,6 +436,28 @@ def main():
         if name != "show":
             rsub.add_argument("--note", default="", help="Why (saved with the decision)")
     sub.set_defaults(func=cmd_review, review_command="list", note="")
+
+    # openvz-leads stage [<prospect_id> [<stage>]]
+    sub = subparsers.add_parser(
+        "stage",
+        help="Show the pipeline, or move a prospect through it",
+        description=(
+            "With no arguments, prints how many prospects sit at each stage. "
+            "With an id, prints that prospect's history. With an id and a "
+            "stage, moves them — and tells the CRM, if one is configured."
+        ),
+    )
+    sub.add_argument("prospect_id", nargs="?", default="", help="From 'openvz-leads status'")
+    sub.add_argument(
+        "stage", nargs="?", default="",
+        help="new, queued, contacted, replied, meeting, won, lost, opted_out",
+    )
+    sub.add_argument("--note", default="", help="Why (saved with the move)")
+    sub.add_argument(
+        "--force", action="store_true",
+        help="Move even when the transition is not a legal one",
+    )
+    sub.set_defaults(func=cmd_stage)
 
     # openvz-leads export <dataset> --format <fmt>
     sub = subparsers.add_parser(

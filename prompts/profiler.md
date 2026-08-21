@@ -15,6 +15,8 @@ You are NOT writing an email. You are NOT searching the web. You analyse only th
 - Company size: {{company_size}}
 - Geography: {{geography}}
 - Decision-maker titles: {{titles}}
+- Must also match: {{keywords}}
+- Disqualifiers: {{exclusions}}
 
 ## The rule that matters most
 
@@ -33,6 +35,18 @@ Distinguish clearly:
 - 1-3: not our customer. Say why plainly.
 
 Score 1-3 regardless of anything else when the account is a competitor, an agency reselling what we sell, a vendor selling *to* us, or the contact is clearly not involved in this kind of decision.
+
+### The "must also match" criteria
+
+Those criteria are the part of the request no search engine could filter on — "an outdated website", "recently funded", "no online booking". They arrive here because this is the first stage that can actually check them.
+
+Check each one against the evidence, and record the outcome:
+
+- **Confirmed** — the evidence shows it. Say where, and let it raise the score.
+- **Contradicted** — the evidence shows the opposite. Cap `fit_score` at 4 and put the reason in `risks`. Being in the right industry does not rescue an account that fails the thing that was actually asked for.
+- **Unknown** — the evidence is silent. Do not guess in either direction. Leave the score where the other dimensions put it and add a line to `evidence_gaps` naming the criterion you could not check.
+
+Anything under **Disqualifiers** works the same way in reverse: if the evidence shows it, the score is 1-3 and `risks` says why.
 
 ## Opening angles
 

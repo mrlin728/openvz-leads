@@ -9,8 +9,10 @@ import logging
 import re
 from datetime import date
 
+from openvz_leads import pipeline
 from openvz_leads.brain import Brain
 from openvz_leads.config import LeadsConfig, EnvConfig
+from openvz_leads.integrations.crm import CrmSync
 from openvz_leads.integrations.instantly import InstantlyClient
 from openvz_leads.state import SENDABLE_CAMPAIGN_STATUS, StateManager
 
@@ -35,6 +37,9 @@ class Sender:
         self.state = state
         self.config = config
         self.instantly = InstantlyClient(env.instantly_api_key)
+        # Deploying a sequence is the moment a prospect becomes "contacted",
+        # which is the first stage most CRMs want a record for.
+        self.crm = CrmSync(config.crm, env)
 
     async def run(self):
         """Deploy approved campaigns to the configured outbound provider."""
@@ -227,7 +232,10 @@ class Sender:
         # succeeds but this write failed, a retry would re-add the same
         # leads. Better to under-count than double-send.
         for prospect in prospects:
-            await self.state.update_prospect_status(prospect.id, "contacted")
+            await pipeline.advance(
+                self.state, prospect.id, "contacted",
+                reason="Sequence deployed", actor="sender", crm=self.crm,
+            )
 
         # 4. Activate campaign
         result = await self.instantly.activate_campaign(campaign_id)

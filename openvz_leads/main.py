@@ -8,8 +8,10 @@ from datetime import datetime, time, timedelta
 
 import pytz
 
+from openvz_leads import pipeline
 from openvz_leads.brain import Brain
 from openvz_leads.config import ConfigError, load_config, load_env, LeadsConfig
+from openvz_leads.integrations.crm import CrmSync
 from openvz_leads.state import StateManager
 
 logging.basicConfig(
@@ -147,7 +149,7 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
         return
     env = load_env()
     state = StateManager()
-    brain = Brain(state)
+    brain = Brain(state, config.model, env)
 
     await state.init_db()
     logger.info("Database initialized.")
@@ -181,8 +183,20 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
             "Human review is OFF — approved campaigns will be sent automatically."
         )
 
+    crm = CrmSync(config.crm, env)
+    logger.info(f"CRM sync: {crm.describe()}")
+
+    ready, why = brain.readiness()
+    if not ready:
+        logger.error(f"Cannot start — {why}")
+        return
+    logger.info(f"Thinking with: {brain.describe()}")
+
     interval = config.usage.heartbeat_interval_minutes * 60
-    max_calls = max(int(200 * (config.usage.max_daily_claude_percent / 100)), 1)
+    max_calls = max(
+        int(config.model.daily_call_budget * (config.usage.max_daily_claude_percent / 100)),
+        1,
+    )
     consecutive_errors = 0
 
     while not stop_event.is_set():
@@ -195,7 +209,16 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                     break
                 continue
 
-            # 2. Check usage budget
+            # 2. Flush anything the CRM missed. Costs no model calls, and
+            #    runs before the budget check on purpose: a pipeline that has
+            #    stopped thinking should still finish telling the CRM what
+            #    already happened.
+            try:
+                await pipeline.sync_pending(state, crm)
+            except Exception as e:
+                logger.warning(f"CRM sync pass failed: {e}")
+
+            # 3. Check usage budget
             if not await brain.is_within_budget(max_calls):
                 logger.info(
                     f"Daily usage limit reached ({max_calls} calls). "
@@ -205,12 +228,12 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                     break
                 continue
 
-            # 3. Decide what to do
+            # 4. Decide what to do
             logger.info("Checking pipeline state...")
             summary = await state.get_state_summary()
             action = await decide_next_action(brain, state, config, summary=summary)
 
-            # 4. Execute — run independent agents in parallel where possible
+            # 5. Execute — run independent agents in parallel where possible
             # Handler is always safe to run alongside other agents
             tasks = []
             has_open_convos = summary.get("open_conversations", 0) > 0
@@ -251,7 +274,7 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                 if isinstance(result, Exception):
                     logger.error(f"Agent {name} failed: {result}", exc_info=result)
 
-            # 5. Log the action (best-effort; never kills the loop)
+            # 6. Log the action (best-effort; never kills the loop)
             try:
                 await state.log_action(action_type=action, agent="main")
             except Exception as e:

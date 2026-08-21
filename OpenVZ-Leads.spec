@@ -44,7 +44,14 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=['playwright', 'tkinter', 'pytest', 'IPython', 'matplotlib', 'numpy'],
+    # crawl4ai and browser_use are opt-in extras and each drags in a browser
+    # runtime; bundling them would multiply the download for a tier most
+    # installs never reach. The crawler detects their absence and uses the
+    # basic tier, so the frozen app is fully functional without them.
+    excludes=[
+        'playwright', 'tkinter', 'pytest', 'IPython', 'matplotlib', 'numpy',
+        'crawl4ai', 'browser_use',
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
