@@ -81,6 +81,10 @@ async def decide_next_action(
     approved_campaigns = summary.get("approved_campaigns", 0) or 0
     pending_review = summary.get("pending_review", 0) or 0
     open_conversations = summary.get("open_conversations", 0) or 0
+    # Gmail schedules its own follow-ups, so there is mail to send on days
+    # when nothing new was approved. Without this the queue would only drain
+    # when a fresh campaign happened to come through.
+    due_sends = summary.get("due_sends", 0) or 0
 
     can_send = config.channels.email.sending_enabled
 
@@ -100,6 +104,11 @@ async def decide_next_action(
         action, reason = (
             "send_campaign",
             f"{approved_campaigns} approved campaign(s) ready to deploy",
+        )
+    elif due_sends > 0 and can_send:
+        action, reason = (
+            "send_campaign",
+            f"{due_sends} scheduled message(s) due",
         )
     elif needs_profiling:
         action, reason = "profile", "prospects are waiting to be analysed"

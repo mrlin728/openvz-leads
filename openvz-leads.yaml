@@ -92,13 +92,62 @@ profiling:
 
 # ── Channels ──────────────────────────────────────────────────────────
 # provider: "none" is draft-only — everything runs, nothing is sent, and
-# you take the results out with `openvz-leads export`. Set it to
-# "instantly" (and add INSTANTLY_API_KEY to .env) to actually send.
+# you take the results out with `openvz-leads export`.
+#
+#   none       draft only (default)
+#   gmail      send from your own mailbox. Threads properly, replies land in
+#              your inbox, no third party holds the list. In exchange you own
+#              the deliverability: a personal mailbox that suddenly sends 50
+#              cold emails a day is a mailbox Google will limit. Keep
+#              max_daily_sends low and raise it slowly.
+#   instantly  a sending platform. It warms domains and rotates inboxes,
+#              and it holds your prospect list.
 channels:
   email:
     enabled: true
     provider: "none"
+    # Counts follow-ups, not just first contacts. On the Gmail path this is
+    # the number that keeps a real mailbox out of trouble; 50 is already
+    # brisk for a new sending address.
     max_daily_sends: 50
+
+    # Only read when provider is "gmail".
+    gmail:
+      sender_name: ""          # blank = persona.name
+
+      # What the mailbox may be read for.
+      #   metadata  headers only — enough to see that they replied and stop
+      #             the follow-ups, without this tool ever holding the text
+      #             of someone's reply. The default, and enough for most.
+      #   readonly  bodies too, so replies can be classified and (if you
+      #             turn auto_reply on) answered. Broader; opt in knowingly.
+      #   none      send only. Follow-ups could not be stopped, so this is
+      #             rejected at startup unless max_followups is 0.
+      read_scope: "metadata"
+
+      # However long a sequence the Writer produced, send at most this many
+      # follow-ups after the first email, no closer together than this.
+      max_followups: 2
+      min_followup_days: 2
+
+      # The opt-out and the postal address.
+      #
+      # Instantly appended these for us. Gmail does not — it is a mailbox,
+      # not a sending platform — so this is the only thing between you and
+      # an unlawful commercial email. CAN-SPAM, PECR and most equivalents
+      # require a working opt-out mechanism and a real postal address.
+      #
+      # The mechanism here is a reply: any refusal — "stop", "remove me",
+      # "not interested, don't email again" — is treated as immediate and
+      # permanent, so it is a real mechanism rather than a gesture.
+      #
+      # postal_address is empty on purpose and nothing will send until you
+      # fill it in. A placeholder would go out as a fake address in real
+      # mail, which is worse than not sending.
+      footer:
+        enabled: true
+        opt_out_line: "Reply \"stop\" and I won't contact you again."
+        postal_address: ""
   linkedin:
     enabled: false       # automating LinkedIn violates their ToS — see README
     max_daily_connections: 20

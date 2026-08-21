@@ -15,6 +15,8 @@ This product's whole shape is *human-in-the-loop*. Do not undo it:
 - **The analysis never fabricates.** `prompts/profiler.md` forbids inventing evidence and requires `confidence` and `evidence_gaps`. If you edit that prompt, keep those rules — a brief that sounds confident about invented facts is worse than no brief, because a rep will repeat it in a cold email.
 - **The ICP parser declares what it guessed.** `prompts/icp.md` requires an `assumptions` list and forbids inventing a geography. A parse that silently fills in a country sends the Scout somewhere nobody asked about, and the results never reveal it.
 - **Only a person can call a win.** `pipeline.HUMAN_ONLY` keeps `won` out of every agent's reach. Nothing in an inbox proves a deal closed, and a product that refuses to invent a buying signal must not invent a sale.
+- **A follow-up never goes out after a reply.** On the Gmail path the Sender checks the thread immediately before every follow-up, and *defers rather than sends* when the mailbox cannot be read. If you touch that code, keep the failure direction: not knowing whether they replied is not the same as knowing they did not.
+- **Nothing sends without a footer.** `channels.email.gmail.footer.postal_address` has no default, and the Sender refuses to queue anything while it is empty. Do not add a placeholder to "make setup smoother" — it would go out as a fake address in real commercial mail.
 
 ---
 
@@ -45,6 +47,8 @@ Check state silently, then guide from where they are:
 - **"How do I tell it who to look for?"** → `openvz-leads target "..."`, or the Target tab in the dashboard. It shows the parse and its assumptions first; nothing is written until they say yes, and only the `icp:` block changes.
 
 - **"Does it send emails?"** → Only if you connect a sending provider *and* approve each campaign. Out of the box it drafts and you export — CSV for your CRM, Markdown to read, JSON for anything downstream.
+
+- **"Can it send from my own Gmail?"** → Yes: `channels.email.provider: gmail`, an OAuth client of their own in `.env`, then `openvz-leads gmail login`. Say the trade out loud before they do it — a platform warms domains and rotates inboxes, a personal mailbox does neither, and the account Google rate-limits is the one they read their real mail in. Start `max_daily_sends` at ten or twenty.
 
 - **"How does it find people?"** → Web search (DuckDuckGo → Bing → Google → Serper if a key is set), then it visits company sites, finds team members, and verifies email addresses by pattern plus SMTP check.
 
@@ -176,6 +180,13 @@ Only `approved` is sendable. `state.review_campaign()` refuses to decide anythin
 
 Campaigns awaiting review are **not** an action — they block on a person, not the agent.
 
+### Sending through Gmail
+- **Setup**: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` in `.env` (a *Desktop app* OAuth client in their own Google Cloud project, Gmail API enabled), then `openvz-leads gmail login`. The browser flow is theirs — never ask for a password, and never offer to do the OAuth yourself.
+- **Four jobs the platform used to do**, all now in `agents/sender.py` and `outreach.py`: scheduling (the `outbox` table), merge-variable substitution, the opt-out footer, and stopping on a reply.
+- **`read_scope`**: `metadata` (default) sees *that* they replied; `readonly` sees what they said, which the Handler needs to classify intent. `none` plus `max_followups > 0` is rejected at startup — follow-ups that cannot be stopped are the worst thing this could ship.
+- **Threading**: follow-ups carry `In-Reply-To` and Gmail's `threadId`, so they land in the same conversation. `Re:` on a real thread is honest; the ban is on faking a history.
+- **After an outage** every overdue step is due at once. `_flush_outbox` sends at most one message per prospect per pass, and `rebase_outbox_after_send` measures the next gap from the actual send. Do not "optimise" either away.
+
 ### Key commands
 ```bash
 source .venv/bin/activate    # always first
@@ -188,6 +199,7 @@ openvz-leads train <url>
 openvz-leads target "dental clinics in California"
 openvz-leads stage                                # the funnel
 openvz-leads stage <id> meeting --note "Thu 3pm"
+openvz-leads gmail login | status | logout
 openvz-leads setup
 ```
 
@@ -201,6 +213,8 @@ openvz-leads setup
 - **`target` gives a rough parse and says "parsed by rules"** — no model was reachable. Check `claude login`, or the key for whichever provider is configured
 - **crawl4ai / browser-use "not installed"** — they are optional extras, excluded from the desktop builds on purpose. `pip install "openvz-leads[crawl]"`. The basic tier still reads the page
 - **Stage changes not reaching the CRM** — they are not lost. Check `stage_events` where `synced = 0`; the heartbeat retries every cycle. `synced = 2` means the receiver returned a 4xx, and `sync_error` says what it was
+- **Approved campaigns are not sending on the Gmail path** — check in this order: `channels.email.gmail.footer.postal_address` (blocks everything while empty), `openvz-leads gmail status`, then `max_daily_sends` against `SELECT COUNT(*) FROM outbox WHERE status='sent' AND DATE(sent_at)=DATE('now')`
+- **A queued message says "Not sent — {{company}} has no value"** — working as intended. The prospect has no company on record, and there is no substitution that makes the sentence work. Fix the record, or narrow the copy
 
 ### Releasing
 Both artefacts are built on the OS they run on — PyInstaller freezes the

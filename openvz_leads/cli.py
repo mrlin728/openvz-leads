@@ -165,6 +165,11 @@ def cmd_status(args):
         print(f"  Awaiting your review:   {summary['pending_review']}")
         print(f"  Approved, ready to go:  {summary['approved_campaigns']}")
         print(f"  Active campaigns:       {summary['active_campaigns']}")
+        if summary.get("pending_sends"):
+            print(
+                f"  Scheduled to send:      {summary['pending_sends']}"
+                f"  ({summary.get('due_sends', 0)} due now)"
+            )
         print(f"  Open conversations:     {summary['open_conversations']}")
         print(f"  Claude calls today:     {summary['usage_today']}")
         if summary["pending_review"]:
@@ -255,6 +260,68 @@ def cmd_stage(args):
         print()
 
     asyncio.run(_stage())
+
+
+def cmd_gmail(args):
+    """Authorise a Gmail account, or report which one is authorised."""
+    from openvz_leads.config import ConfigError, load_config, load_env
+    from openvz_leads.integrations import gmail as gmail_api
+
+    env = load_env()
+
+    read_scope = "metadata"
+    footer_problem = ""
+    try:
+        config = load_config()
+        read_scope = config.channels.email.gmail.read_scope
+        footer_problem = config.channels.email.gmail.footer.problem()
+    except (ConfigError, Exception):
+        # Authorising before the product is configured is a reasonable order
+        # to do things in; default to the narrowest useful scope.
+        pass
+
+    if args.gmail_command == "status":
+        creds = gmail_api.load_credentials(env)
+        client = gmail_api.GmailClient(creds, read_scope)
+        ready, why = client.readiness()
+        print()
+        if ready:
+            print(f"  Authorised as: {creds.email_address or '(unknown address)'}")
+            print(f"  Scopes:        {', '.join(creds.scopes) or '(none recorded)'}")
+            print(f"  Token:         {gmail_api.token_path()}")
+        else:
+            print(f"  Not ready — {why}")
+        if footer_problem:
+            print()
+            print(f"  Sending is still blocked: {footer_problem}")
+        print()
+        return
+
+    if args.gmail_command == "logout":
+        path = gmail_api.token_path()
+        if path.exists():
+            path.unlink()
+            print(f"\n  Removed {path}.")
+            print("  The account is still authorised at Google — revoke it at")
+            print("  https://myaccount.google.com/permissions if you want that too.\n")
+        else:
+            print("\n  No stored token to remove.\n")
+        return
+
+    # login
+    try:
+        creds = gmail_api.run_login(env, read_scope=read_scope, open_browser=not args.no_browser)
+    except gmail_api.GmailError as e:
+        print(f"\n  {e}\n")
+        sys.exit(1)
+
+    print(f"\n  Authorised as {creds.email_address or '(address unknown)'}.")
+    print(f"  Token saved to {gmail_api.token_path()} (readable only by you).")
+    if footer_problem:
+        print()
+        print("  One thing left before anything can be sent:")
+        print(f"  {footer_problem}")
+    print()
 
 
 def cmd_export(args):
@@ -458,6 +525,28 @@ def main():
         help="Move even when the transition is not a legal one",
     )
     sub.set_defaults(func=cmd_stage)
+
+    # openvz-leads gmail <login|status|logout>
+    sub = subparsers.add_parser(
+        "gmail",
+        help="Authorise the mailbox OpenVZ Leads sends from",
+        description=(
+            "Sending through Gmail needs two things: an OAuth client of your "
+            "own (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env), and an "
+            "authorised account. This does the second. The browser flow is "
+            "yours to complete — no password ever passes through this tool, "
+            "and only a refresh token is stored, in your workspace."
+        ),
+    )
+    gmail_subs = sub.add_subparsers(dest="gmail_command")
+    login = gmail_subs.add_parser("login", help="Authorise an account in your browser")
+    login.add_argument(
+        "--no-browser", action="store_true",
+        help="Print the URL instead of opening it (for a remote shell)",
+    )
+    gmail_subs.add_parser("status", help="Show which account is authorised")
+    gmail_subs.add_parser("logout", help="Delete the stored token")
+    sub.set_defaults(func=cmd_gmail, gmail_command="status", no_browser=False)
 
     # openvz-leads export <dataset> --format <fmt>
     sub = subparsers.add_parser(

@@ -23,6 +23,7 @@
 | 多模型 | `brain.py` 从「Claude CLI 的封装」改成「模型调用的唯一入口」：`claude_cli`（默认，无额外费用）/ `openai` / `deepseek` / 任意 OpenAI 兼容端点 |
 | 分层抓取 | 新增 `integrations/crawler.py`：crawl4ai（渲染 JS，返回 Markdown）→ basic（httpx + BeautifulSoup）→ browser_use（真浏览器）。上面两层是可选依赖，都不装时行为与改造前完全一致 |
 | 阶段机 | 新增 `pipeline.py` 与 `stage_events` 表：已找到 → 已起草 → 已触达 → 已回复 → 已约会面 → 赢单 / 丢单，带历史与终态规则。赢单只能由人标 |
+| Gmail 发信 | 新增 `integrations/gmail.py` 与 `outbox` 表：用用户自己的邮箱发信、按线程做真正的跟进。发信平台原本负责的四件事全部自建 —— 排程、合并变量替换（缺值拒发而不是发出「Hi ,」）、退订页脚（`postal_address` 未填则一封不发）、以及每封跟进前的回复检查（读不到邮箱时延后而非发送） |
 | CRM 同步 | 新增 `integrations/crm.py`：每次阶段变化按固定 payload 推给 webhook 或写入文件；失败重试、按顺序投递、4xx 才判永久失败 |
 
 上游的合规默认值（硬性退订处理、发送上限、真实身份声明）全部保留。

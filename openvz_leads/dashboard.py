@@ -290,7 +290,41 @@ def _engine_summary() -> dict:
         "brain_problem": why,
         "crawl": describe_tiers(config.crawl),
         "crm": CrmSync(config.crm, env).describe(),
+        "sending": _sending_summary(config, env),
+        "sending_problem": _sending_problem(config, env),
     }
+
+
+def _sending_summary(config, env) -> str:
+    provider = config.channels.email.provider
+    if provider == "none":
+        return "off — drafted and queued for review, never sent"
+    if provider == "gmail":
+        from openvz_leads.integrations import gmail as gmail_api
+
+        creds = gmail_api.load_credentials(env)
+        who = creds.email_address or "no account authorised"
+        return f"gmail — {who}"
+    return provider
+
+
+def _sending_problem(config, env) -> str:
+    """Why nothing would send, or ''.
+
+    Reported even when sending is off, because "off" is a choice and a
+    misconfigured "on" is a surprise — and the two look identical from the
+    outside until a campaign sits approved for a week.
+    """
+    if config.channels.email.provider != "gmail":
+        return ""
+    from openvz_leads.integrations import gmail as gmail_api
+
+    footer = config.channels.email.gmail.footer.problem()
+    if footer:
+        return footer
+    creds = gmail_api.load_credentials(env)
+    client = gmail_api.GmailClient(creds, config.channels.email.gmail.read_scope)
+    return client.readiness()[1]
 
 
 @app.get("/api/settings")
@@ -336,6 +370,36 @@ async def save_env_settings(request: Request):
                 logger.warning("Failed to write .env: %s", e)
                 return {"success": False, "message": "Could not write .env file."}
     return {"success": True}
+
+
+@app.post("/api/settings/google")
+async def save_google_settings(request: Request):
+    """Store the OAuth *client*. The account is authorised from the CLI.
+
+    Deliberately not a browser flow started from here: the loopback redirect
+    has to land back on a port this process owns, and a half-finished
+    authorisation begun in one tab and abandoned in another is a confusing
+    failure to debug. One command, one browser window, one outcome.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    updates = {}
+    for field, key in (
+        ("client_id", "GOOGLE_CLIENT_ID"),
+        ("client_secret", "GOOGLE_CLIENT_SECRET"),
+    ):
+        value = str(body.get(field) or "").strip()
+        if value:
+            updates[key] = value
+    if not updates:
+        return JSONResponse({"error": "Nothing to save."}, status_code=400)
+
+    async with _env_lock:
+        _write_env_file(updates)
+    return {"ok": True, "saved": sorted(updates)}
 
 
 @app.post("/api/settings/test-instantly")
@@ -985,6 +1049,67 @@ async def stage_history(prospect_id: str):
         (prospect_id,),
     )
     return rows
+
+
+# ── Gmail and the send queue ──────────────────────────────────────────
+
+
+@app.get("/api/gmail/status")
+async def gmail_status():
+    """Whether this install can send, and what is missing if it cannot."""
+    from openvz_leads.config import load_env
+    from openvz_leads.integrations import gmail as gmail_api
+
+    config = _load_config_or_none()
+    settings = config.channels.email.gmail if config else None
+    read_scope = settings.read_scope if settings else "metadata"
+
+    env = load_env()
+    creds = gmail_api.load_credentials(env)
+    client = gmail_api.GmailClient(creds, read_scope)
+    ready, why = client.readiness()
+
+    return {
+        "provider": config.channels.email.provider if config else "none",
+        "ready": ready,
+        "problem": why,
+        "address": creds.email_address,
+        "read_scope": read_scope,
+        "scopes": creds.scopes,
+        "client_configured": bool(env.google_client_id and env.google_client_secret),
+        # Kept separate from `problem`: the credentials can be perfect while
+        # the footer still blocks every send, and conflating the two sends
+        # people to fix the wrong thing.
+        "footer_problem": settings.footer.problem() if settings else "",
+        "max_followups": settings.max_followups if settings else 0,
+    }
+
+
+@app.get("/api/outbox")
+async def get_outbox():
+    """What is queued, and what recently went out.
+
+    The single most reassuring screen in a product that sends email by
+    itself: not "trust me", but "here is the list, with the times".
+    """
+    rows = await query_db(
+        """SELECT o.id, o.step, o.subject, o.status, o.reason, o.send_after,
+                  o.sent_at, o.attempts, o.provider_thread_id,
+                  p.first_name, p.last_name, p.email, p.company
+           FROM outbox o
+           LEFT JOIN prospects p ON p.id = o.prospect_id
+           ORDER BY
+             CASE o.status WHEN 'pending' THEN 0 ELSE 1 END,
+             COALESCE(o.sent_at, o.send_after) ASC
+           LIMIT 200"""
+    )
+    counts = await query_db(
+        "SELECT status, COUNT(*) AS n FROM outbox GROUP BY status"
+    )
+    return {
+        "rows": rows,
+        "counts": {row["status"]: row["n"] for row in counts},
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1707,6 +1832,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <!-- Campaigns -->
 <div id="campaigns" class="section">
   <div class="section-head"><h2 data-i18n="campaigns.title">Campaigns</h2><p data-i18n="campaigns.sub">Email sequences OpenVZ Leads has written and deployed.</p></div>
+  <div class="card" id="outbox-card" style="display:none">
+    <h2 data-i18n="outbox.title">The send queue</h2>
+    <p class="lede" data-i18n="outbox.lede">Every message scheduled to go out, with the time it will go. A follow-up is dropped the moment they reply — cancelled rows stay here with the reason.</p>
+    <div id="outbox-body"></div>
+  </div>
   <div id="campaigns-list"></div>
 </div>
 
@@ -1752,6 +1882,23 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div id="instantly-test-result"></div>
     </div>
     <button class="btn btn-primary" onclick="saveInstantly()" data-i18n="settings.save">Save</button>
+  </div>
+
+  <div class="card">
+    <h2>Gmail <span class="optional-tag" data-i18n="settings.optional">optional</span></h2>
+    <p class="lede" data-i18n-html="settings.googleLede">Send from your own mailbox instead of a platform. These two identify the <em>application</em>; your account is authorised separately, in a browser, by <span style="font-family:var(--mono);font-size:12px">openvz-leads gmail login</span> — no password passes through this tool.</p>
+    <div id="gmail-state" style="font-size:12.5px;color:var(--text-2);margin-bottom:16px"></div>
+    <div class="form-group">
+      <label class="form-label" for="google-client-id" data-i18n="settings.clientId">Client ID</label>
+      <input type="text" class="form-input" id="google-client-id" autocomplete="off"
+             data-i18n-placeholder="settings.googleIdPlaceholder" placeholder="xxxxx.apps.googleusercontent.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="google-client-secret" data-i18n="settings.clientSecret">Client Secret</label>
+      <input type="password" class="form-input" id="google-client-secret" autocomplete="off"
+             data-i18n-placeholder="settings.googleSecretPlaceholder" placeholder="Your OAuth client secret">
+    </div>
+    <button class="btn btn-primary" onclick="saveGoogle()" data-i18n="settings.save">Save</button>
   </div>
 
   <div class="card">
@@ -1930,6 +2077,27 @@ const I18N = {
     'crm.none': '未开启',
     'crm.webhook': 'Webhook',
     'crm.file': '写入文件',
+    'setup.engineSending': '发信',
+    'settings.googleLede': '用你自己的邮箱发，而不是发信平台。下面这两项标识的是<em>应用</em>；你的账号是另外授权的 —— 在浏览器里跑 <span style="font-family:var(--mono);font-size:12px">openvz-leads gmail login</span>，密码不经过这个工具。',
+    'settings.clientId': 'Client ID',
+    'settings.clientSecret': 'Client Secret',
+    'settings.googleIdPlaceholder': 'xxxxx.apps.googleusercontent.com',
+    'settings.googleSecretPlaceholder': '你的 OAuth client secret',
+    'settings.gmailAuthorised': '已授权：{address}',
+    'settings.gmailNotSelected': '注意：channels.email.provider 目前不是 "gmail"，所以这里配好了也不会走这条路。',
+    'settings.saved': '已保存',
+    'settings.saveFailed': '保存失败',
+    'outbox.title': '发送队列',
+    'outbox.lede': '每一封排好队要发出去的信，以及它会在什么时候发。对方一回复，跟进立刻作废 —— 作废的行会留在这里并写明原因。',
+    'outbox.who': '收件人',
+    'outbox.step': '第几封',
+    'outbox.subject': '主题',
+    'outbox.when': '时间',
+    'outbox.state': '状态',
+    'outbox.count.pending': '{n} 封待发',
+    'outbox.count.sent': '{n} 封已发',
+    'outbox.count.cancelled': '{n} 封已作废',
+    'outbox.count.failed': '{n} 封失败',
     'nav.target': '定位',
     'target.title': '你要找什么样的客户？',
     'target.sub': '像跟同事说话那样写一句就行。它会变成 Scout 搜索、Profiler 打分所依据的 ICP —— 但要先让你看清楚，它替你填了哪些你根本没说的东西。',
@@ -2205,6 +2373,26 @@ const I18N = {
     'crm.none': 'off',
     'crm.webhook': 'webhook',
     'crm.file': 'file',
+    'setup.engineSending': 'Sending',
+    'settings.clientId': 'Client ID',
+    'settings.clientSecret': 'Client Secret',
+    'settings.googleIdPlaceholder': 'xxxxx.apps.googleusercontent.com',
+    'settings.googleSecretPlaceholder': 'Your OAuth client secret',
+    'settings.gmailAuthorised': 'Authorised as {address}',
+    'settings.gmailNotSelected': 'Note: channels.email.provider is not "gmail", so nothing here will be used yet.',
+    'settings.saved': 'Saved',
+    'settings.saveFailed': 'Could not save',
+    'outbox.title': 'The send queue',
+    'outbox.lede': 'Every message scheduled to go out, with the time it will go. A follow-up is dropped the moment they reply — cancelled rows stay here with the reason.',
+    'outbox.who': 'To',
+    'outbox.step': 'Step',
+    'outbox.subject': 'Subject',
+    'outbox.when': 'When',
+    'outbox.state': 'State',
+    'outbox.count.pending': '{n} queued',
+    'outbox.count.sent': '{n} sent',
+    'outbox.count.cancelled': '{n} cancelled',
+    'outbox.count.failed': '{n} failed',
     'nav.target': 'Target',
     'target.title': 'Who are you looking for?',
     'target.sub': 'Say it the way you would say it to a colleague. It becomes the ICP the Scout searches on and the Profiler scores against — after you have seen what it filled in that you never said.',
@@ -2834,7 +3022,7 @@ function loadCurrentTab() {
     case 'briefs': loadBriefs(); break;
     case 'review': loadReview(); break;
     case 'export': renderExport(); break;
-    case 'campaigns': loadCampaigns(); break;
+    case 'campaigns': loadCampaigns(); loadOutbox(); break;
     case 'conversations': loadConversations(); break;
     case 'activity': loadActivity(); break;
     case 'settings': loadSettings(); break;
@@ -3116,6 +3304,10 @@ async function loadSetupStatus() {
                       engine.brain_ready ? '' : engine.brain_problem);
     html += engineRow(t('setup.engineCrawl'), engine.crawl, '');
     html += engineRow(t('setup.engineCrm'), engine.crm, '');
+    if (engine.sending) {
+      html += engineRow(t('setup.engineSending'), engine.sending,
+                        engine.sending_problem || '');
+    }
   }
 
   document.getElementById('setup-checklist').innerHTML = html;
@@ -3133,6 +3325,111 @@ function engineRow(label, value, problem) {
     '</div></div>';
 }
 
+async function saveGoogle() {
+  const client_id = document.getElementById('google-client-id').value.trim();
+  const client_secret = document.getElementById('google-client-secret').value.trim();
+  if (!client_id && !client_secret) return;
+  try {
+    const res = await fetch('/api/settings/google', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id, client_secret}),
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || t('settings.saveFailed'), 'error'); return; }
+    showToast(t('settings.saved'), 'success');
+    document.getElementById('google-client-secret').value = '';
+    loadGmailState();
+  } catch (e) {
+    showToast(t('settings.saveFailed'), 'error');
+  }
+}
+
+async function loadGmailState() {
+  const box = document.getElementById('gmail-state');
+  if (!box) return;
+  let data;
+  try {
+    data = await (await fetch('/api/gmail/status')).json();
+  } catch (e) { box.textContent = ''; return; }
+
+  const lines = [];
+  if (data.ready) {
+    lines.push('<span style="color:var(--accent)">&#10003;</span> '
+      + escHtml(tf('settings.gmailAuthorised', {address: data.address || '—'})));
+  } else if (data.problem) {
+    lines.push('<span style="color:var(--amber)">&#9679;</span> ' + escHtml(data.problem));
+  }
+  // Separate line on purpose: the credentials can be perfect while the
+  // footer still blocks every send.
+  if (data.footer_problem) {
+    lines.push('<span style="color:var(--amber)">&#9679;</span> '
+      + escHtml(data.footer_problem));
+  }
+  if (data.provider !== 'gmail') {
+    lines.push(escHtml(t('settings.gmailNotSelected')));
+  }
+  box.innerHTML = lines.join('<br>');
+}
+
+// ── The send queue ──
+
+async function loadOutbox() {
+  const card = document.getElementById('outbox-card');
+  const body = document.getElementById('outbox-body');
+  if (!card || !body) return;
+  let data;
+  try {
+    data = await (await fetch('/api/outbox')).json();
+  } catch (e) {
+    card.style.display = 'none';
+    return;
+  }
+  const rows = data.rows || [];
+  if (!rows.length) {
+    // Nothing queued ever: the Instantly path and the draft-only path both
+    // leave this empty, and an empty table there would just be confusing.
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const counts = data.counts || {};
+  const summary = ['pending', 'sent', 'cancelled', 'failed']
+    .filter(k => counts[k])
+    .map(k => escHtml(tf('outbox.count.' + k, {n: counts[k]})))
+    .join(' · ');
+
+  let html = '<div style="font-size:12px;color:var(--text-3);margin-bottom:14px">'
+    + summary + '</div>';
+  html += '<div class="table-card"><table><thead><tr>'
+    + '<th>' + escHtml(t('outbox.who')) + '</th>'
+    + '<th>' + escHtml(t('outbox.step')) + '</th>'
+    + '<th>' + escHtml(t('outbox.subject')) + '</th>'
+    + '<th>' + escHtml(t('outbox.when')) + '</th>'
+    + '<th>' + escHtml(t('outbox.state')) + '</th>'
+    + '</tr></thead><tbody>';
+
+  for (const row of rows.slice(0, 100)) {
+    const name = [row.first_name, row.last_name].filter(Boolean).join(' ')
+      || row.email || '—';
+    const when = row.status === 'pending' ? row.send_after : (row.sent_at || row.send_after);
+    html += '<tr>'
+      + '<td>' + escHtml(name) + '<div style="font-size:11px;color:var(--text-3)">'
+        + escHtml(row.company || row.email || '') + '</div></td>'
+      + '<td>' + escHtml(String(row.step)) + '</td>'
+      + '<td>' + escHtml(row.subject || '') + '</td>'
+      + '<td style="white-space:nowrap">' + escHtml(formatDate(when)) + '</td>'
+      + '<td>' + badge(row.status)
+        + (row.reason ? '<div style="font-size:11px;color:var(--text-3);max-width:34ch">'
+            + escHtml(row.reason) + '</div>' : '')
+      + '</td>'
+      + '</tr>';
+  }
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+
 // ── Settings ──
 
 async function loadSettings() {
@@ -3142,6 +3439,7 @@ async function loadSettings() {
   document.getElementById('linkedin-email').value = data.linkedin_email || '';
   document.getElementById('linkedin-password').value = '';
   document.getElementById('cf-account-id').value = data.cloudflare_account_id || '';
+  loadGmailState();
   document.getElementById('cf-api-token').value = '';
   if (data.linkedin_password_set) {
     document.getElementById('linkedin-password').placeholder = t('settings.passwordSaved');

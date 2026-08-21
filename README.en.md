@@ -51,7 +51,7 @@ With no model available (no Claude CLI, or a configured provider with no key) a 
 | **Understand** | One brief per account: what they do, why they fit (score + reasons), buying signals, likely pains, decision chain, opening angles — and **what not to say** | Profiler |
 | **Write** | A 3-email sequence built on that brief, following proven frameworks under one hard rule: invent nothing | Writer |
 | **Wait for you** | The campaign enters a review queue. Nothing leaves before you approve it | You |
-| **Follow up** | With a channel configured, the sequence goes out; replies are classified, the stage advances, and a clear no stops everything | Sender / Handler |
+| **Follow up** | Sent from your own Gmail on a schedule this owns; **the moment they reply, the rest of the sequence is dropped**, and a clear no is recorded as lost | Sender / Handler |
 | **Move it along** | Contacted → replied → meeting → won / lost. Every move recorded, and pushed to a CRM if one is configured | `openvz-leads stage` |
 
 Then it stops. **Nothing is sent by default.**
@@ -122,6 +122,7 @@ leaving the rest of the file, comments included, exactly as it was.
 openvz-leads run          # heartbeat: find → analyse → draft → queue for review
 openvz-leads dashboard    # http://localhost:5555
 openvz-leads stage        # where everyone is in the pipeline
+openvz-leads gmail login  # only if sending from your own mailbox
 ```
 
 ---
@@ -244,6 +245,7 @@ openvz_leads/
 ├── trainer.py       learn the product from a website
 ├── icp.py           a sentence → an ICP, and what it inferred  ← new in this fork
 ├── pipeline.py      stage machine + stage history              ← new in this fork
+├── outreach.py      merge variables and the footer; refuses on a gap ← new
 │
 ├── agents/
 │   ├── scout.py     prospecting (DuckDuckGo → Bing → Google → Serper)
@@ -256,6 +258,7 @@ openvz_leads/
 ├── integrations/
 │   ├── crawler.py   tiered page reading: crawl4ai / basic / browser_use  ← new
 │   ├── crm.py       stage changes, pushed to a CRM                       ← new
+│   ├── gmail.py     sending from your own mailbox, and reading threads ← new
 │   └── email_finder.py · instantly.py · linkedin.py · calendar.py
 │
 └── models/
@@ -274,7 +277,7 @@ The settings in `openvz-leads.yaml` worth knowing:
 | Setting | Default | Notes |
 |---|---|---|
 | `review.require_approval` | `true` | Turn off and it sends automatically. Leave it on |
-| `channels.email.provider` | `none` | `none` = draft-only |
+| `channels.email.provider` | `none` | `none` = draft-only; `gmail` = your own mailbox; `instantly` = a sending platform |
 | `profiling.output_language` | `English` | Language the briefs are written in |
 | `profiling.min_score` | `5` | Don't analyse below this score (saves Claude calls) |
 | `profiling.max_per_cycle` | `5` | Analyses per heartbeat |
@@ -310,6 +313,42 @@ Three tiers, cheapest first. `auto` uses the best one installed and only escalat
 Neither installed is a perfectly normal install — it is exactly what this did before the tiers existed. The desktop builds **deliberately exclude** both: each drags in a browser runtime, and multiplying the download for a tier most installs never reach is not a trade worth making.
 
 The browser tier stays off until you set `crawl.browser_fallback: true`.
+
+### Sending from your own Gmail
+
+```yaml
+channels:
+  email:
+    provider: "gmail"
+    max_daily_sends: 20        # start low — see below
+    gmail:
+      read_scope: "metadata"   # metadata | readonly | none
+      max_followups: 2
+      min_followup_days: 2
+      footer:
+        postal_address: "Your real postal address"
+```
+
+Two steps: put `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env` (create an OAuth client of type *Desktop app* in your own Google Cloud project and enable the Gmail API on it), then `openvz-leads gmail login` to authorise an account in a browser. **No password passes through this tool** — only a refresh token is stored, locally, mode 0600.
+
+Dropping the platform means four things become this product's job. Each one is a way to send a genuinely bad email:
+
+| | What happens |
+|---|---|
+| **Scheduling** | One outbox row per step with a not-before time. Visible in `openvz-leads status` and the dashboard's send queue |
+| **Merge variables** | `{{first_name}}` and friends are substituted by `outreach.py`. **A missing value stops the message** — `first_name` falls back to "there", but nothing makes "I saw 's site" into a sentence, so a missing `company` or `title` cancels that send with the reason recorded |
+| **The footer** | An opt-out line and a postal address on every message. `postal_address` is empty on purpose and nothing sends until you fill it in — a placeholder would go out as a fake address in real mail |
+| **Stop on reply** | Checked immediately before every follow-up. **If the mailbox cannot be read, the follow-up is deferred rather than sent** — not knowing whether they replied is not the same as knowing they did not |
+
+`read_scope` decides what the mailbox may be read for:
+
+- `metadata` (default) — headers only. Enough to see that they answered and stop the follow-ups, without this tool ever holding the text of anyone's reply.
+- `readonly` — bodies too, so the Handler can classify intent and, if you turn it on, draft an answer. Broader than most prospecting needs, so you opt in.
+- `none` — send only. Follow-ups could not be stopped, so **this configuration is rejected at startup** unless `max_followups` is 0.
+
+Follow-ups are real threads: `In-Reply-To` points at the previous message, so they arrive as one conversation in the recipient's client rather than three unrelated cold emails.
+
+**On Gmail, volume is the whole risk.** A platform warms domains and rotates inboxes; a personal mailbox does neither. A mailbox that sends fifty cold emails on its first day is a mailbox Google rate-limits — and the account it limits is the one you read your real mail in. Start `max_daily_sends` around ten or twenty and raise it over weeks, not days.
 
 ### Syncing to a CRM
 
@@ -348,7 +387,9 @@ OpenVZ Leads automates outreach, but **you are the sender**. Cold email is legal
 **CAN-SPAM (US)** — every commercial email must have:
 - A truthful subject line and accurate from-name/address (the copywriting rules enforce this — no fake "re:" threads, no impersonation)
 - A working unsubscribe mechanism, honoured within 10 business days (any opt-out wording — "stop", "remove me", "unsubscribe" — is treated as immediate and permanent)
-- Your valid physical mailing address in the footer — **enable this in your sending platform's campaign settings before launching**
+- Your valid physical mailing address in the footer — **who adds it depends on the channel**:
+  - `provider: instantly` — the platform does. Enable it in the campaign settings before launching.
+  - `provider: gmail` — **nothing else will.** Gmail is a mailbox, not a sending platform, so this product appends the footer itself from `channels.email.gmail.footer`, and refuses to send at all while `postal_address` is empty.
 
 **GDPR / PECR (EU & UK)** — B2B cold email requires a defensible *legitimate interest*: the pitch must be genuinely relevant to the recipient's professional role. You must be able to say where you got their data, and objecting must be effortless. If you can't articulate why a specific person would care, don't email them — and the qualification rules say so.
 
@@ -362,7 +403,7 @@ Sending cold email from your main company domain, or at volume from day one, wil
 
 1. **Buy a dedicated sending domain** (e.g. `getacme.com` instead of `acme.com`) so your primary domain's reputation is never at risk. Point it at your real site.
 2. **Set up SPF, DKIM, and DMARC** on the sending domain. Without all three, Gmail and Outlook will junk you.
-3. **Warm up for 2–4 weeks** before real volume. Most sending platforms have built-in warmup — turn it on and leave it on.
+3. **Warm up for 2–4 weeks** before real volume. Most sending platforms have built-in warmup — turn it on and leave it on. **The Gmail path has no warm-up to turn on** — that is part of what you trade for it, and the only substitute is climbing more slowly.
 4. **Ramp slowly**: start at 10–20 emails/day per inbox, add ~5/day. The default `max_daily_sends: 50` is a ceiling, not a starting point.
 5. **Watch bounce and spam rates.** Bounce rate above ~3% or any spam complaints: pause, fix your list quality, ramp again. Emails are verified before sending to keep bounces low, but platform metrics are your ground truth.
 

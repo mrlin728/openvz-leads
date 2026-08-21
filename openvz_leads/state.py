@@ -253,7 +253,54 @@ MIGRATIONS: list[str] = [
     -- is the closest true answer and beats leaving it null.
     UPDATE prospects SET stage_changed_at = updated_at WHERE stage_changed_at IS NULL;
     """,
+    # ── v5: an outbox, for sending we schedule ourselves ──
+    """
+    -- Instantly held the schedule: we handed it a sequence and it decided
+    -- when each step went out. Sending through the user's own mailbox means
+    -- owning that, so every step of every sequence becomes a row here with
+    -- the time it may be sent and the state it reached.
+    --
+    -- One row per (campaign, prospect, step), enforced below. That unique
+    -- index is the double-send guard: scheduling the same campaign twice —
+    -- a retry, a crash mid-deploy, someone clicking approve twice — inserts
+    -- nothing the second time rather than queueing a duplicate email.
+    CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT DEFAULT '',
+        prospect_id TEXT REFERENCES prospects(id),
+        step INTEGER DEFAULT 1,
+        subject TEXT DEFAULT '',
+        body TEXT DEFAULT '',
+        -- Not before this. The heartbeat sends what is due.
+        send_after TIMESTAMP,
+        -- pending → sent | cancelled | failed
+        status TEXT DEFAULT 'pending',
+        -- Why it was cancelled or how it failed. Read by a human, so it is
+        -- a sentence rather than a code.
+        reason TEXT DEFAULT '',
+        provider_message_id TEXT DEFAULT '',
+        provider_thread_id TEXT DEFAULT '',
+        -- The RFC 2822 Message-ID, which is what the next step references so
+        -- the follow-up lands in the same conversation.
+        rfc_message_id TEXT DEFAULT '',
+        attempts INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        sent_at TIMESTAMP
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_outbox_step
+        ON outbox(campaign_id, prospect_id, step);
+    CREATE INDEX IF NOT EXISTS idx_outbox_due
+        ON outbox(status, send_after);
+    CREATE INDEX IF NOT EXISTS idx_outbox_prospect ON outbox(prospect_id);
+    CREATE INDEX IF NOT EXISTS idx_outbox_thread ON outbox(provider_thread_id);
+    """,
 ]
+
+# Outbox lifecycle. `pending` is the only one the sender acts on, and the
+# three others are all terminal — nothing ever goes back to pending, because
+# a row that could be re-queued is a row that could be sent twice.
+OUTBOX_STATUSES = ("pending", "sent", "cancelled", "failed")
 
 # The prospect pipeline, in order. Mirrors openvz_leads/pipeline.py, which
 # owns the transition rules; this tuple exists so state queries can group and
@@ -482,6 +529,230 @@ class StateManager:
                 (status, _utcnow().isoformat(), prospect_id),
             )
             await db.commit()
+
+    # ── Outbox ──
+
+    async def schedule_outbox(self, rows: list[dict]) -> int:
+        """Queue sends. Returns how many were new.
+
+        INSERT OR IGNORE against the unique (campaign, prospect, step) index,
+        so calling this twice for the same campaign queues nothing the second
+        time. That is the whole double-send guard, and it lives in the
+        database rather than in a caller's memory of what it already did.
+        """
+        if not rows:
+            return 0
+        now = _utcnow().isoformat()
+        async with self._connect() as db:
+            cursor = await db.executemany(
+                """INSERT OR IGNORE INTO outbox
+                   (id, campaign_id, prospect_id, step, subject, body,
+                    send_after, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                [
+                    (
+                        _new_id(),
+                        row["campaign_id"],
+                        row["prospect_id"],
+                        int(row.get("step", 1)),
+                        row.get("subject", ""),
+                        row.get("body", ""),
+                        row["send_after"],
+                        now,
+                    )
+                    for row in rows
+                ],
+            )
+            await db.commit()
+            return cursor.rowcount or 0
+
+    async def get_due_outbox(self, limit: int = 25, now: datetime | None = None) -> list[dict]:
+        """Pending sends whose time has come, oldest first.
+
+        Ordered by (prospect, step) within time so a prospect's step 2 can
+        never be sent in the same pass as their step 1 out of order.
+        """
+        moment = (now or _utcnow()).isoformat()
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM outbox
+                   WHERE status = 'pending' AND send_after <= ?
+                   ORDER BY send_after ASC, prospect_id ASC, step ASC
+                   LIMIT ?""",
+                (moment, limit),
+            ) as cursor:
+                return [dict(row) for row in await cursor.fetchall()]
+
+    async def mark_outbox_sent(
+        self,
+        outbox_id: str,
+        *,
+        message_id: str = "",
+        thread_id: str = "",
+        rfc_message_id: str = "",
+    ) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """UPDATE outbox
+                   SET status = 'sent', sent_at = ?, provider_message_id = ?,
+                       provider_thread_id = ?, rfc_message_id = ?,
+                       attempts = attempts + 1
+                   WHERE id = ?""",
+                (
+                    _utcnow().isoformat(),
+                    message_id,
+                    thread_id,
+                    rfc_message_id,
+                    outbox_id,
+                ),
+            )
+            await db.commit()
+
+    async def mark_outbox_failed(self, outbox_id: str, error: str) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """UPDATE outbox
+                   SET status = 'failed', reason = ?, attempts = attempts + 1
+                   WHERE id = ?""",
+                (error[:500], outbox_id),
+            )
+            await db.commit()
+
+    async def defer_outbox(self, outbox_id: str, send_after: datetime, error: str = "") -> None:
+        """Leave it pending, try again later. For failures worth retrying."""
+        async with self._connect() as db:
+            await db.execute(
+                """UPDATE outbox
+                   SET send_after = ?, reason = ?, attempts = attempts + 1
+                   WHERE id = ? AND status = 'pending'""",
+                (send_after.isoformat(), error[:500], outbox_id),
+            )
+            await db.commit()
+
+    async def rebase_outbox_after_send(
+        self, prospect_id: str, *, above_step: int, earliest: datetime
+    ) -> int:
+        """Push this prospect's later steps out to at least `earliest`.
+
+        The schedule is computed when a campaign is queued, on the assumption
+        that each step goes out roughly on time. It does not always: the agent
+        is off for a week, the daily cap is hit, a mailbox is unreachable.
+        When it catches up, every overdue step is due at once — and sending
+        steps two and three ninety seconds apart is worse than sending them
+        late, because it is the one thing the follow-up gap exists to prevent.
+
+        So the gap is measured from when the previous step actually went out,
+        not from when it was supposed to.
+        """
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """UPDATE outbox
+                   SET send_after = ?
+                   WHERE prospect_id = ? AND status = 'pending'
+                     AND step > ? AND send_after < ?""",
+                (
+                    earliest.isoformat(),
+                    prospect_id,
+                    above_step,
+                    earliest.isoformat(),
+                ),
+            )
+            await db.commit()
+            return cursor.rowcount or 0
+
+    async def cancel_outbox_for_prospect(
+        self, prospect_id: str, reason: str, *, above_step: int = 0
+    ) -> int:
+        """Drop this prospect's queued sends. Returns how many were dropped.
+
+        Only touches `pending` rows — a sent email cannot be unsent, and
+        pretending otherwise in the record would be a lie about what the
+        prospect received.
+        """
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """UPDATE outbox
+                   SET status = 'cancelled', reason = ?
+                   WHERE prospect_id = ? AND status = 'pending' AND step > ?""",
+                (reason[:500], prospect_id, above_step),
+            )
+            await db.commit()
+            return cursor.rowcount or 0
+
+    async def get_thread_anchor(self, campaign_id: str, prospect_id: str) -> dict | None:
+        """The most recent sent message in this prospect's sequence.
+
+        A follow-up threads onto it: Gmail wants the threadId, and the
+        recipient's mail client wants In-Reply-To pointing at the RFC
+        Message-ID. Without both, step two arrives as an unrelated cold email
+        and the sequence reads as three strangers rather than one.
+        """
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM outbox
+                   WHERE campaign_id = ? AND prospect_id = ? AND status = 'sent'
+                   ORDER BY step DESC LIMIT 1""",
+                (campaign_id, prospect_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_open_threads(self) -> list[dict]:
+        """One sent row per live thread, for the reply check.
+
+        Excludes prospects who already replied or opted out: their follow-ups
+        are cancelled and there is nothing left to stop.
+        """
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT o.prospect_id, o.campaign_id, o.provider_thread_id,
+                          MAX(o.sent_at) AS last_sent_at,
+                          p.email, p.status
+                   FROM outbox o
+                   JOIN prospects p ON p.id = o.prospect_id
+                   WHERE o.status = 'sent'
+                     AND o.provider_thread_id != ''
+                     AND p.status NOT IN ('replied', 'opted_out', 'lost', 'won')
+                   GROUP BY o.provider_thread_id"""
+            ) as cursor:
+                return [dict(row) for row in await cursor.fetchall()]
+
+    async def count_outbox_sent_today(self) -> int:
+        """Messages actually sent today — the number a daily cap should count.
+
+        Not the same as prospects contacted today: a follow-up is a send but
+        not a new contact, and a cap that ignores follow-ups is a cap that
+        lets a mailbox send three times what it was told to.
+        """
+        today = date.today().isoformat()
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'sent' AND DATE(sent_at) = ?",
+                (today,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def count_pending_outbox(self) -> int:
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'pending'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def count_due_outbox(self, now: datetime | None = None) -> int:
+        moment = (now or _utcnow()).isoformat()
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM outbox WHERE status = 'pending' AND send_after <= ?",
+                (moment,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
 
     # ── Pipeline stages ──
 
@@ -1022,6 +1293,12 @@ class StateManager:
         return {
             "prospects": prospect_counts,
             "stages": await self.count_prospects_by_stage(),
+            # Only ever non-zero on the Gmail path, where this product owns
+            # the schedule. Surfaced in the summary because the heartbeat
+            # decides what to do next from these counts, and a follow-up due
+            # in an hour is work even when no campaign is awaiting deploy.
+            "due_sends": await self.count_due_outbox(),
+            "pending_sends": await self.count_pending_outbox(),
             "draft_campaigns": draft_campaigns,
             "active_campaigns": active_campaigns,
             "pending_review": pending_review,

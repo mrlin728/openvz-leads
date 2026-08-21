@@ -78,6 +78,7 @@ class Handler:
         self.brain = brain
         self.state = state
         self.config = config
+        self.env = env
         self.instantly = InstantlyClient(env.instantly_api_key)
         # Replies are where the interesting stages happen — replied, lost,
         # opted_out — so this is the agent a CRM most wants to hear from.
@@ -92,6 +93,10 @@ class Handler:
         self.skills = self.brain.load_skills_for_agent("handler")
 
         if not self.config.channels.email.enabled:
+            return
+
+        if self.config.channels.email.provider == "gmail":
+            await self._run_gmail()
             return
 
         # 1. Fetch active campaigns
@@ -129,6 +134,124 @@ class Handler:
             logger.info(f"Handler: Processed {total_handled} replies.")
         else:
             logger.info("Handler: No new replies.")
+
+    # ── Gmail ────────────────────────────────────────────────────────
+
+    async def _run_gmail(self):
+        """Walk the live threads and act on anything they said.
+
+        The Sender already checks for a reply immediately before each
+        follow-up, which covers the case that matters most. This covers the
+        rest: someone who answers after the sequence has finished, or during
+        a gap, should still be recorded as having replied rather than sitting
+        at 'contacted' until a human notices.
+        """
+        settings = self.config.channels.email.gmail
+        if not settings.can_detect_replies:
+            logger.info(
+                "Handler: channels.email.gmail.read_scope is 'none', so "
+                "replies cannot be seen. Nothing to check."
+            )
+            return
+
+        from openvz_leads.integrations import gmail as gmail_api
+
+        creds = gmail_api.load_credentials(self.env)
+        client = gmail_api.GmailClient(creds, settings.read_scope)
+        ready, why = client.readiness()
+        if not ready:
+            logger.warning(f"Handler: Gmail is not ready — {why}")
+            return
+
+        threads = await self.state.get_open_threads()
+        if not threads:
+            logger.info("Handler: no open threads to check.")
+            return
+
+        try:
+            our_address = await client.address()
+        except gmail_api.GmailError as e:
+            logger.error(f"Handler: could not read the mailbox: {e}")
+            return
+
+        handled = 0
+        for thread in threads:
+            try:
+                if await self._check_thread(client, thread, our_address):
+                    handled += 1
+            except gmail_api.GmailNotAuthorised as e:
+                logger.error(f"Handler: {e}")
+                return
+            except Exception as e:
+                logger.error(
+                    f"Handler: could not check thread "
+                    f"{thread.get('provider_thread_id', '')}: {e}"
+                )
+
+        logger.info(
+            f"Handler: {handled} new repl{'y' if handled == 1 else 'ies'} "
+            f"across {len(threads)} thread(s)."
+        )
+
+    async def _check_thread(self, client, thread: dict, our_address: str) -> bool:
+        """Act on one thread. Returns True when a new reply was found."""
+        replies = await client.thread_replies(
+            thread["provider_thread_id"], our_address=our_address
+        )
+        if not replies:
+            return False
+
+        latest = replies[-1]
+        # Gmail message ids are stable, so they dedupe across cycles exactly
+        # the way Instantly's reply uuids did.
+        if await self.state.is_reply_processed(latest.message_id):
+            return False
+
+        prospect = await self.state.get_prospect(thread["prospect_id"])
+        if prospect is None:
+            await self.state.mark_reply_processed(latest.message_id)
+            return False
+
+        # Stop the sequence first, and unconditionally. Everything below this
+        # can fail — a model call, a classification — and none of it should be
+        # able to leave a follow-up queued to someone who has answered.
+        cancelled = await self.state.cancel_outbox_for_prospect(
+            prospect.id, "They replied — follow-ups stopped."
+        )
+        if cancelled:
+            logger.info(
+                f"Handler: {prospect.email} replied — stopped {cancelled} "
+                "queued follow-up(s)."
+            )
+
+        if not latest.body:
+            # read_scope is 'metadata': we can see that they answered, not
+            # what they said. Record the reply and leave the reading to a
+            # person — which is the trade that scope exists to make.
+            await pipeline.advance(
+                self.state, prospect.id, "replied",
+                reason="Replied (headers only — read_scope is 'metadata')",
+                actor="handler", crm=self.crm,
+            )
+            await self.state.mark_reply_processed(latest.message_id)
+            return True
+
+        campaign = await self._campaign_for(thread.get("campaign_id", ""))
+        try:
+            await self._process_reply(
+                prospect.email, latest.body, latest.message_id, campaign
+            )
+        finally:
+            await self.state.mark_reply_processed(latest.message_id)
+        return True
+
+    async def _campaign_for(self, campaign_id: str):
+        if not campaign_id:
+            return None
+        try:
+            return await self.state.get_campaign(campaign_id)
+        except Exception:
+            return None
 
     async def _handle_reply(self, reply: dict, campaign) -> bool:
         """Process a single reply. Returns True if a new reply was handled."""

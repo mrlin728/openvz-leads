@@ -10,11 +10,15 @@ Write like a real person sending a real email. Not a marketer. Not AI. A human w
 
 Style rules are negotiable. These are not:
 
-- **Subject lines must be truthful.** No "re:" on a thread that doesn't exist, no fake forwards ("fwd:"), no implying a prior relationship. Deceptive subject lines violate CAN-SPAM.
+- **Subject lines must be truthful.** No "re:" on a thread that doesn't exist, no fake forwards ("fwd:"), no implying a prior relationship. Deceptive subject lines violate CAN-SPAM. (A follow-up sent *into a real thread* legitimately carries `Re:` — that is a genuine reply to a message that was genuinely sent. The prohibition is on faking the history, not on having one.)
 - **Identity must be real.** The from-name, company, and signature must match the configured persona. Never pose as an individual consumer, a customer, or a mutual contact.
-- **Every campaign needs a working opt-out.** The sending platform (Instantly) must have unsubscribe handling enabled, and the sender's valid physical mailing address must appear in the campaign footer. OpenVZ Leads never writes copy that discourages opting out.
+- **Every campaign needs a working opt-out and a real postal address**, and *who supplies them depends on the channel*:
+  - `provider: instantly` — the platform does it. Unsubscribe handling must be enabled there, and the address set in the campaign footer.
+  - `provider: gmail` — nothing else will. Gmail is a mailbox, not a sending platform. OpenVZ Leads appends the footer itself from `channels.email.gmail.footer`, and refuses to send at all while `postal_address` is empty. The opt-out mechanism is a reply, which is real because any refusal is honoured immediately and permanently — see the next point.
+  - Either way: never write copy that discourages opting out, and never write your own footer into the body. Duplicating it is how one of the two ends up stale.
 - **Any opt-out wording counts.** "Stop", "remove me", "not interested, don't email again" — treat all of them as unsubscribes, immediately and permanently, even mid-conversation.
 - **Deliverability hygiene:** plain text only, at most one link per email (zero in email 1 is better), no attachments, no image pixels beyond what the platform adds, no ALL-CAPS or spam-trigger phrasing ("free money", "act now", "guarantee"). One recipient's spam report costs more than a hundred sends earn.
+- **On Gmail, volume is the whole risk.** A sending platform warms domains and rotates inboxes; a personal mailbox does neither. A mailbox that sends fifty cold emails on its first day is a mailbox Google rate-limits, and the account it limits is the one the user reads their real mail in. Start `max_daily_sends` low — ten or twenty — and raise it over weeks, not days.
 - **EU/UK prospects:** B2B cold email requires a defensible legitimate-interest basis — the pitch must be genuinely relevant to the person's professional role, and the first email should make it easy to object. When relevance is a stretch, don't send.
 
 ---

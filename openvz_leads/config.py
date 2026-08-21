@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
 from openvz_leads import paths as _paths
 
@@ -90,12 +90,120 @@ class ICPConfig(BaseModel):
         raise ValueError("must be a list of short phrases")
 
 
+class GmailFooterConfig(BaseModel):
+    """The opt-out line, and the postal address that has to sit under it.
+
+    Instantly appended these for us. Gmail does not — it is a mailbox, not a
+    sending platform — so with `provider: gmail` this product is the only
+    thing standing between the user and an unlawful commercial email.
+
+    CAN-SPAM (US), PECR (UK) and most equivalents require a working opt-out
+    mechanism and a valid physical postal address in commercial mail. There
+    is no link to click here, so the mechanism is a reply: the Handler
+    already treats "stop", "remove me" and every other refusal as immediate
+    and permanent, which makes a reply a real mechanism rather than a
+    gesture.
+
+    `postal_address` has no default on purpose. A placeholder would ship as
+    a fake address in real mail, which is worse than refusing to send.
+    """
+
+    enabled: bool = True
+    opt_out_line: str = "Reply \"stop\" and I won't contact you again."
+    postal_address: str = ""
+
+    @field_validator("opt_out_line", "postal_address", mode="before")
+    @classmethod
+    def _clean(cls, v):
+        return str(v or "").strip()
+
+    def problem(self) -> str:
+        """Why this footer cannot be used, or '' when it can."""
+        if not self.enabled:
+            return (
+                "channels.email.gmail.footer.enabled is false. Commercial "
+                "email needs a working opt-out and a postal address; turning "
+                "the footer off is a decision to send without them."
+            )
+        if not self.opt_out_line:
+            return "channels.email.gmail.footer.opt_out_line is empty."
+        if not self.postal_address:
+            return (
+                "channels.email.gmail.footer.postal_address is empty. Most "
+                "jurisdictions require a real postal address in commercial "
+                "mail, and a made-up one is worse than not sending."
+            )
+        return ""
+
+    def render(self) -> str:
+        return f"{self.opt_out_line}\n{self.postal_address}"
+
+
+class GmailConfig(BaseModel):
+    """Sending through the user's own mailbox.
+
+    The trade against a sending platform is deliberate. A platform warms
+    domains, rotates inboxes and reports deliverability; Gmail does none of
+    that, and a personal mailbox that suddenly sends fifty cold emails a day
+    is a mailbox that gets limited. In exchange the mail comes from a real
+    person's real address, threads properly, and no third party holds the
+    prospect list.
+
+    Which is why max_daily_sends matters more here, not less.
+    """
+
+    # Blank falls back to persona.name — one place to write who you are.
+    sender_name: str = ""
+    # What the mailbox is allowed to read back.
+    #
+    #   metadata  headers only. Enough to see that they replied and stop the
+    #             follow-ups, which is the part that matters. Default.
+    #   readonly  message bodies too, so the Handler can classify intent and
+    #             (if you turn it on) draft a reply. Broader than most
+    #             prospecting needs, so it is opt-in.
+    #   none      send only. Follow-ups will not stop on a reply — an
+    #             unpleasant enough combination that it is rejected below
+    #             unless follow-ups are off.
+    read_scope: str = "metadata"
+    # Cap on follow-ups regardless of how long a sequence the Writer produced.
+    max_followups: int = 2
+    # Minimum gap between two sends to the same person, whatever the sequence
+    # says. A Writer that emits delay_days: 0 twice should not send twice in
+    # a minute.
+    min_followup_days: int = 2
+    footer: GmailFooterConfig = GmailFooterConfig()
+
+    @field_validator("read_scope")
+    @classmethod
+    def _known_scope(cls, v: str) -> str:
+        known = {"metadata", "readonly", "none"}
+        normalized = (v or "metadata").strip().lower()
+        if normalized not in known:
+            raise ValueError(
+                f"'{v}' is not a Gmail read scope. Use one of: {sorted(known)}."
+            )
+        return normalized
+
+    @field_validator("max_followups", "min_followup_days")
+    @classmethod
+    def _non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("must be >= 0")
+        return v
+
+    @property
+    def can_detect_replies(self) -> bool:
+        return self.read_scope != "none"
+
+
 class EmailChannelConfig(BaseModel):
     enabled: bool = True
     # "none" means OpenVZ Leads never sends: it finds, analyses and drafts,
     # and you export the results. Sending is strictly opt-in.
     provider: str = "none"
     max_daily_sends: int = 50
+    # Only read when provider is "gmail".
+    gmail: GmailConfig = GmailConfig()
 
     @field_validator("max_daily_sends")
     @classmethod
@@ -107,13 +215,31 @@ class EmailChannelConfig(BaseModel):
     @field_validator("provider")
     @classmethod
     def _known_provider(cls, v: str) -> str:
-        known = {"none", "instantly"}
+        known = {"none", "gmail", "instantly"}
         normalized = (v or "none").strip().lower()
         if normalized not in known:
             raise ValueError(
                 f"'{v}' is not a supported email provider. Use one of: {sorted(known)}."
             )
         return normalized
+
+    @model_validator(mode="after")
+    def _reply_detection_is_possible(self):
+        """Refuse a configuration that would follow up into a reply.
+
+        Sending follow-ups you cannot stop is the single worst thing this
+        product could do: the prospect answers, and the machine keeps mailing
+        them on schedule. Better to fail at startup than to be that.
+        """
+        if self.provider == "gmail" and not self.gmail.can_detect_replies:
+            if self.gmail.max_followups > 0:
+                raise ValueError(
+                    "channels.email.gmail.read_scope is 'none', so replies "
+                    "cannot be seen and follow-ups could not be stopped. "
+                    "Either widen read_scope to 'metadata', or set "
+                    "max_followups to 0 to send one email and nothing more."
+                )
+        return self
 
     @property
     def sending_enabled(self) -> bool:
@@ -416,6 +542,12 @@ class EnvConfig(BaseModel):
     # Bearer token for crm.webhook_url. Kept out of the YAML because the
     # YAML is the file people paste into issues.
     crm_webhook_token: str = ""
+    # Google OAuth client for sending through the user's own mailbox. These
+    # identify the *application*, not the account — the account is authorised
+    # separately by `openvz-leads gmail login`, and its refresh token is
+    # written to the workspace, never here.
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
     def key_for_provider(self, provider: str) -> str:
         """The API key a model provider needs, or '' for the CLI.
@@ -496,6 +628,8 @@ def load_env() -> EnvConfig:
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", "").strip(),
         model_api_key=os.getenv("MODEL_API_KEY", "").strip(),
         crm_webhook_token=os.getenv("CRM_WEBHOOK_TOKEN", "").strip(),
+        google_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
+        google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", "").strip(),
     )
     if not env.instantly_api_key:
         # Not a problem: sending is opt-in. Finding, analysing, drafting and

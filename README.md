@@ -51,7 +51,7 @@ openvz-leads target "Find dental clinics in California with outdated websites an
 | **分析客户** | 每个客户一份简报：他们是做什么的、为什么匹配（打分 + 理由）、采购信号、可能的痛点、决策链、破冰角度、以及**不要说什么** | Profiler |
 | **写开发信** | 基于上面那份简报写 3 封序列，遵守成熟的冷邮件框架和一条严格的「不许编造」规则 | Writer |
 | **等你点头** | 活动进入审核队列。批准之前不会发出任何东西 | 你 |
-| **跟进与回复** | 已配发信通道时投递序列；回复分类后推进阶段，明确拒绝的直接停 | Sender / Handler |
+| **跟进与回复** | 用你自己的 Gmail 发出去，按排程自动跟进；**对方一回复立刻停**，明确拒绝的判丢单 | Sender / Handler |
 | **推进阶段** | 已触达 → 已回复 → 已约会面 → 赢单 / 丢单，每一步都记录，可同步到 CRM | `openvz-leads stage` |
 
 然后它停下来。**默认不发信。**
@@ -119,6 +119,7 @@ openvz-leads target "帮我找美国牙科诊所"
 openvz-leads run          # 心跳循环：找 → 分析 → 写 → 排队等你审
 openvz-leads dashboard    # 浏览器打开 http://localhost:5555
 openvz-leads stage        # 看每个人现在在哪一步
+openvz-leads gmail login  # 只有要用自己邮箱发信时才需要
 ```
 
 ---
@@ -241,6 +242,7 @@ openvz_leads/
 ├── trainer.py       从官网学产品
 ├── icp.py           一句话 → ICP，并说清替你填了什么   ← 本版新增
 ├── pipeline.py      阶段机 + 阶段历史                  ← 本版新增
+├── outreach.py      合并变量替换与页脚，缺值就拒发      ← 本版新增
 │
 ├── agents/
 │   ├── scout.py     找客户（DuckDuckGo → Bing → Google → Serper）
@@ -253,6 +255,7 @@ openvz_leads/
 ├── integrations/
 │   ├── crawler.py   分层读网页：crawl4ai / basic / browser_use  ← 本版新增
 │   ├── crm.py       阶段变化推给 CRM                            ← 本版新增
+│   ├── gmail.py     从你自己的邮箱发信、按线程查回复    ← 本版新增
 │   └── email_finder.py · instantly.py · linkedin.py · calendar.py
 │
 └── models/
@@ -271,7 +274,7 @@ skills/     销售知识库，纯 markdown，直接改
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `review.require_approval` | `true` | 关掉才会自动发。建议一直开着 |
-| `channels.email.provider` | `none` | `none` = 只起草不发送 |
+| `channels.email.provider` | `none` | `none` = 只起草不发送；`gmail` = 用你自己的邮箱发；`instantly` = 用发信平台 |
 | `profiling.output_language` | `English` | 客户分析用什么语言写 |
 | `profiling.min_score` | `5` | 低于这个分的客户不做分析（省 Claude 调用） |
 | `profiling.max_per_cycle` | `5` | 每轮最多分析几个 |
@@ -307,6 +310,42 @@ key 放 `.env`：`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，或者用 `MODEL_API_KE
 两个都没装也完全正常——那就是这套东西存在之前的行为。桌面安装包**刻意不打包**这两个：它们各自会拖进一整套浏览器运行时，为一个多数人用不到的层把下载体积翻几倍不值得。
 
 浏览器层默认关着，要开得写 `crawl.browser_fallback: true`。
+
+### 用你自己的 Gmail 发信
+
+```yaml
+channels:
+  email:
+    provider: "gmail"
+    max_daily_sends: 20        # 从低往上加，见下
+    gmail:
+      read_scope: "metadata"   # metadata | readonly | none
+      max_followups: 2
+      min_followup_days: 2
+      footer:
+        postal_address: "你的真实通信地址"
+```
+
+两步：`.env` 里放 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`（在你自己的 Google Cloud 项目里建一个「桌面应用」类型的 OAuth 客户端，并启用 Gmail API），然后 `openvz-leads gmail login` 在浏览器里授权账号。**密码不经过这个工具**，本机只存一个 refresh token，权限 0600。
+
+换掉发信平台意味着这四件事从此归它自己管，每一件漏掉都会真的发出坏邮件：
+
+| | 谁在做 |
+|---|---|
+| **排程** | 每一步一行发件箱记录，带「不早于」时间。`openvz-leads status` 和仪表盘的「发送队列」都能看到 |
+| **合并变量** | `{{first_name}}` 之类由 `outreach.py` 替换。**没值就不发** —— first_name 兜底成 "there"，但 company 和 title 没有能让句子成立的兜底，缺了就作废这封并写明原因 |
+| **退订页脚** | 每封信自动附上退订说明和通信地址。`postal_address` **故意留空**，填之前一封都发不出去 —— 占位地址会作为假地址进真邮件，比不发更糟 |
+| **回复即停** | 每封跟进发出前查一次线程。**读不到邮箱时是延后而不是发** —— 「不知道对方是否回了」和「知道对方没回」不是一回事 |
+
+`read_scope` 决定这个邮箱被允许读到什么：
+
+- `metadata`（默认）—— 只读信头。够用来发现「他回了」并停掉跟进，而这个工具从头到尾不持有任何人回信的正文。
+- `readonly` —— 连正文一起读，Handler 才能判断意图、才谈得上自动回复。范围比多数获客场景需要的宽，所以要你主动选。
+- `none` —— 只发不读。跟进将无法停止，所以**启动时直接拒绝这个配置**，除非你把 `max_followups` 设成 0。
+
+跟进是真线程：`In-Reply-To` 指向上一封，所以在对方的邮件客户端里是同一个会话，而不是三封互不相干的陌生来信。
+
+**Gmail 上真正的风险是量。** 发信平台会养域名、轮换发件箱，个人邮箱两样都没有。一个第一天就发五十封冷邮件的邮箱，是会被 Google 限制的邮箱 —— 而被限制的那个，正是你读日常邮件的那个。`max_daily_sends` 从十几开始，用几周而不是几天往上加。
 
 ### 同步到 CRM
 
@@ -345,7 +384,9 @@ OpenVZ Leads 帮你自动化外联，但**发件人是你**。冷邮件在多数
 **CAN-SPAM（美国）** — 每封商业邮件必须有：
 - 真实的主题行和准确的发件人名称/地址（写信规则里强制了这一点——不许伪造 "re:" 线程，不许冒充他人）
 - 可用的退订方式，10 个工作日内处理（任何退订措辞——"stop"、"remove me"、"unsubscribe"——都会被立即且永久地执行）
-- 页脚里你真实的实体邮寄地址——**投递前在发信平台的活动设置里打开这一项**
+- 页脚里你真实的实体邮寄地址 —— **谁来加这个页脚取决于你走哪条路**：
+  - `provider: instantly` —— 平台加。投递前在发信平台的活动设置里打开这一项。
+  - `provider: gmail` —— **没有别人会加**。Gmail 是邮箱不是发信平台，所以这个页脚由本项目自己附在每封信末尾，内容来自 `channels.email.gmail.footer`；`postal_address` 没填之前，一封都发不出去。
 
 **GDPR / PECR（欧盟与英国）** — B2B 冷邮件需要站得住脚的「正当利益」：内容必须与收件人的职务真正相关。你要能说清数据从哪来，反对必须毫不费力。如果你说不出某个具体的人为什么会在意这件事，就不该给他发信——资格判定规则里也是这么写的。
 
@@ -359,8 +400,8 @@ OpenVZ Leads 帮你自动化外联，但**发件人是你**。冷邮件在多数
 
 1. **买一个专用发信域名**（比如用 `getacme.com` 而不是 `acme.com`），让主域名的声誉永远不暴露在风险里。把它指向你真实的站点。
 2. **给发信域名配好 SPF、DKIM、DMARC。**三个缺一个，Gmail 和 Outlook 就会把你扔进垃圾箱。
-3. **养 2–4 周再上量。**主流发信平台都有内置 warmup，打开并一直开着。
-4. **慢慢爬坡**：每个邮箱从每天 10–20 封开始，每天加 5 封左右。默认的 `max_daily_sends: 50` 是天花板，不是起点。
+3. **养 2–4 周再上量。**主流发信平台都有内置 warmup，打开并一直开着。**Gmail 路径没有 warmup 可开** —— 这是选它要付的代价，只能靠爬坡慢来代替。
+4. **慢慢爬坡**：每个邮箱从每天 10–20 封开始，每天加 5 封左右。默认的 `max_daily_sends: 50` 是天花板，不是起点。走 Gmail 的话把它调到 10–20 再开始 —— 被限制的是你读日常邮件的那个邮箱。
 5. **盯住退信率和投诉率。**退信超过 3% 或出现任何垃圾投诉：暂停，清理名单质量，重新爬坡。发信前会验证邮箱来压低退信，但平台指标才是最终依据。
 
 以上都不构成法律意见。如果你要大规模发送或面向受监管行业，请咨询律师。
