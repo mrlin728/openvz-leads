@@ -123,8 +123,18 @@ def cmd_export(args):
     async def _export():
         state = StateManager()
         await state.init_db()
+        # The written brief already follows profiling.output_language; the
+        # Markdown headings around it follow the same setting, so a Chinese
+        # brief is not framed in English.
+        language = None
         try:
-            path = await Exporter(state).export(
+            from openvz_leads.config import load_config
+
+            language = load_config().profiling.output_language
+        except Exception:
+            pass
+        try:
+            path = await Exporter(state, language).export(
                 dataset=args.dataset, fmt=args.format, out_path=args.out
             )
         except ExportError as e:

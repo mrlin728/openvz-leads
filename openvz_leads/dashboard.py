@@ -629,8 +629,17 @@ async def run_export(request: Request):
     fmt = str(body.get("format") or "csv")
 
     state = StateManager(str(DB_PATH))
+    # Same as the CLI: heading language follows profiling.output_language, so
+    # a Chinese brief does not come out under English headings.
+    language = None
     try:
-        path = await Exporter(state).export(dataset=dataset, fmt=fmt)
+        from openvz_leads.config import load_config
+
+        language = load_config().profiling.output_language
+    except Exception:
+        pass
+    try:
+        path = await Exporter(state, language).export(dataset=dataset, fmt=fmt)
     except ExportError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
@@ -1210,7 +1219,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <div class="header-controls">
     <div class="agent-status" id="header-status">
       <span class="status-dot stopped" id="header-dot"></span>
-      <span id="header-status-text">Checking…</span>
+      <span id="header-status-text" data-i18n="status.checking">Checking…</span>
     </div>
     <button class="refresh-btn" onclick="toggleLang()" id="lang-btn">中文</button>
     <button class="refresh-btn" onclick="loadCurrentTab()" data-i18n="btn.refresh">Refresh</button>
@@ -1239,7 +1248,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 <!-- Setup -->
 <div id="setup" class="section active">
-  <div class="section-head"><h2>Setup</h2><p>Everything OpenVZ Leads needs before it can start closing.</p></div>
+  <div class="section-head"><h2 data-i18n="setup.title">Setup</h2><p data-i18n="setup.sub">Everything OpenVZ Leads needs before it can start closing.</p></div>
   <div class="card">
     <div class="progress-wrap" id="setup-progress"></div>
     <div id="setup-checklist"></div>
@@ -1248,19 +1257,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 <!-- Overview -->
 <div id="overview" class="section">
-  <div class="section-head"><h2>Pipeline Overview</h2><p>Live counts from OpenVZ Leads' local database. Refreshes automatically.</p></div>
+  <div class="section-head"><h2 data-i18n="overview.title">Pipeline Overview</h2><p data-i18n="overview.sub">Live counts from OpenVZ Leads' local database. Refreshes automatically.</p></div>
   <div class="stats-grid" id="stats-grid"></div>
 </div>
 
 <!-- Companies -->
 <div id="companies" class="section">
-  <div class="section-head"><h2>Companies</h2><p>Organizations OpenVZ Leads has researched. Click a row to see its contacts.</p></div>
+  <div class="section-head"><h2 data-i18n="companies.title">Companies</h2><p data-i18n="companies.sub">Organizations OpenVZ Leads has researched. Click a row to see its contacts.</p></div>
   <div id="companies-list"></div>
 </div>
 
 <!-- Contacts -->
 <div id="prospects" class="section">
-  <div class="section-head"><h2>Contacts</h2><p>People OpenVZ Leads has found and verified.</p></div>
+  <div class="section-head"><h2 data-i18n="contacts.title">Contacts</h2><p data-i18n="contacts.sub">People OpenVZ Leads has found and verified.</p></div>
   <div id="prospects-table"></div>
 </div>
 
@@ -1302,86 +1311,86 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 <!-- Conversations -->
 <div id="conversations" class="section">
-  <div class="section-head"><h2>Conversations</h2><p>Every reply, and how OpenVZ Leads handled it.</p></div>
+  <div class="section-head"><h2 data-i18n="conversations.title">Conversations</h2><p data-i18n="conversations.sub">Every reply, and how OpenVZ Leads handled it.</p></div>
   <div id="conversations-list"></div>
 </div>
 
 <!-- Activity -->
 <div id="activity" class="section">
-  <div class="section-head"><h2>Activity</h2><p>A running log of every action OpenVZ Leads' agents have taken.</p></div>
+  <div class="section-head"><h2 data-i18n="activity.title">Activity</h2><p data-i18n="activity.sub">A running log of every action OpenVZ Leads' agents have taken.</p></div>
   <div id="activity-list"></div>
 </div>
 
 <!-- Settings -->
 <div id="settings" class="section">
-  <div class="section-head"><h2>Settings</h2><p>Credentials are stored locally in <span style="font-family:var(--mono);font-size:12px">.env</span> — never sent anywhere except the services themselves.</p></div>
+  <div class="section-head"><h2 data-i18n="settings.title">Settings</h2><p data-i18n-html="settings.sub">Credentials are stored locally in <span style="font-family:var(--mono);font-size:12px">.env</span> — never sent anywhere except the services themselves.</p></div>
   <div class="card">
-    <h2>Instantly (Email Platform)</h2>
-    <p class="lede">Required. Get your API key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a>.</p>
+    <h2 data-i18n="settings.instantlyTitle">Instantly (Email Platform)</h2>
+    <p class="lede" data-i18n-html="settings.instantlyLede">Required. Get your API key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a>.</p>
     <div class="form-group">
-      <label class="form-label" for="instantly-key">API Key</label>
+      <label class="form-label" for="instantly-key" data-i18n="settings.apiKey">API Key</label>
       <div class="form-row">
         <div class="form-group" style="margin-bottom:0">
-          <input type="password" class="form-input" id="instantly-key" placeholder="Enter your Instantly API key" autocomplete="off">
+          <input type="password" class="form-input" id="instantly-key" data-i18n-placeholder="settings.instantlyPlaceholder" placeholder="Enter your Instantly API key" autocomplete="off">
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="toggleVisibility('instantly-key')">Show</button>
-        <button class="btn btn-secondary btn-sm" onclick="testInstantly()">Test</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleVisibility('instantly-key')" data-i18n="settings.show">Show</button>
+        <button class="btn btn-secondary btn-sm" onclick="testInstantly()" data-i18n="settings.test">Test</button>
       </div>
       <div id="instantly-test-result"></div>
     </div>
-    <button class="btn btn-primary" onclick="saveInstantly()">Save</button>
+    <button class="btn btn-primary" onclick="saveInstantly()" data-i18n="settings.save">Save</button>
   </div>
 
   <div class="card">
-    <h2>LinkedIn <span class="optional-tag">optional</span></h2>
-    <p class="lede">For automated LinkedIn prospecting. OpenVZ Leads logs in and searches like a human.</p>
+    <h2>LinkedIn <span class="optional-tag" data-i18n="settings.optional">optional</span></h2>
+    <p class="lede" data-i18n="settings.linkedinLede">For automated LinkedIn prospecting. OpenVZ Leads logs in and searches like a human.</p>
     <div class="form-group">
-      <label class="form-label" for="linkedin-email">Email / Username</label>
+      <label class="form-label" for="linkedin-email" data-i18n="settings.emailOrUser">Email / Username</label>
       <input type="text" class="form-input" id="linkedin-email" placeholder="your@email.com" autocomplete="off">
     </div>
     <div class="form-group">
-      <label class="form-label" for="linkedin-password">Password</label>
-      <input type="password" class="form-input" id="linkedin-password" placeholder="Enter password" autocomplete="new-password">
+      <label class="form-label" for="linkedin-password" data-i18n="settings.password">Password</label>
+      <input type="password" class="form-input" id="linkedin-password" data-i18n-placeholder="settings.passwordPlaceholder" placeholder="Enter password" autocomplete="new-password">
     </div>
-    <button class="btn btn-primary" onclick="saveLinkedIn()">Save</button>
+    <button class="btn btn-primary" onclick="saveLinkedIn()" data-i18n="settings.save">Save</button>
   </div>
 
   <div class="card">
-    <h2>Cloudflare <span class="optional-tag">optional</span></h2>
-    <p class="lede">For deep website crawling with JavaScript rendering during product training. ~$5/month.</p>
+    <h2>Cloudflare <span class="optional-tag" data-i18n="settings.optional">optional</span></h2>
+    <p class="lede" data-i18n="settings.cloudflareLede">For deep website crawling with JavaScript rendering during product training. ~$5/month.</p>
     <div class="form-group">
-      <label class="form-label" for="cf-account-id">Account ID</label>
-      <input type="text" class="form-input" id="cf-account-id" placeholder="Your Cloudflare Account ID" autocomplete="off">
+      <label class="form-label" for="cf-account-id" data-i18n="settings.accountId">Account ID</label>
+      <input type="text" class="form-input" id="cf-account-id" data-i18n-placeholder="settings.cfAccountPlaceholder" placeholder="Your Cloudflare Account ID" autocomplete="off">
     </div>
     <div class="form-group">
-      <label class="form-label" for="cf-api-token">API Token</label>
-      <input type="password" class="form-input" id="cf-api-token" placeholder="Your Cloudflare API Token" autocomplete="off">
+      <label class="form-label" for="cf-api-token" data-i18n="settings.apiToken">API Token</label>
+      <input type="password" class="form-input" id="cf-api-token" data-i18n-placeholder="settings.cfTokenPlaceholder" placeholder="Your Cloudflare API Token" autocomplete="off">
     </div>
-    <button class="btn btn-primary" onclick="saveCloudflare()">Save</button>
+    <button class="btn btn-primary" onclick="saveCloudflare()" data-i18n="settings.save">Save</button>
   </div>
 </div>
 
 <!-- Controls -->
 <div id="controls" class="section">
-  <div class="section-head"><h2>Controls</h2><p>Start and stop OpenVZ Leads' heartbeat loop, and watch what it's doing.</p></div>
+  <div class="section-head"><h2 data-i18n="controls.title">Controls</h2><p data-i18n="controls.sub">Start and stop OpenVZ Leads' heartbeat loop, and watch what it's doing.</p></div>
   <div class="control-panel">
     <div class="card">
-      <h2>Agent</h2>
+      <h2 data-i18n="controls.agent">Agent</h2>
       <div class="status-big" id="control-status">
         <div class="dot stopped" id="control-dot"></div>
-        <span class="label stopped" id="control-label">Stopped</span>
+        <span class="label stopped" id="control-label" data-i18n="controls.stopped">Stopped</span>
       </div>
       <div class="status-meta" id="control-meta"></div>
       <div class="btn-group">
-        <button class="btn btn-primary" id="btn-start" onclick="startAgent()">Start OpenVZ Leads</button>
-        <button class="btn btn-danger" id="btn-stop" onclick="stopAgent()" style="display:none">Stop OpenVZ Leads</button>
+        <button class="btn btn-primary" id="btn-start" onclick="startAgent()" data-i18n="controls.start">Start OpenVZ Leads</button>
+        <button class="btn btn-danger" id="btn-stop" onclick="stopAgent()" style="display:none" data-i18n="controls.stop">Stop OpenVZ Leads</button>
       </div>
     </div>
     <div class="card">
-      <h2>Recent Logs</h2>
-      <div class="log-viewer" id="log-viewer">No logs yet. Start OpenVZ Leads to see activity.</div>
+      <h2 data-i18n="controls.logs">Recent Logs</h2>
+      <div class="log-viewer" id="log-viewer" data-i18n="controls.noLogs">No logs yet. Start OpenVZ Leads to see activity.</div>
       <div class="btn-group">
-        <button class="btn btn-secondary btn-sm" onclick="loadLogs()">Refresh Logs</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadLogs()" data-i18n="controls.refreshLogs">Refresh Logs</button>
       </div>
     </div>
   </div>
@@ -1389,45 +1398,45 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 <!-- Help -->
 <div id="help" class="section">
-  <div class="section-head"><h2>Help</h2><p>What OpenVZ Leads is, how it works, and how to fix the usual problems.</p></div>
+  <div class="section-head"><h2 data-i18n="help.title">Help</h2><p data-i18n="help.sub">What OpenVZ Leads is, how it works, and how to fix the usual problems.</p></div>
 
   <div class="help-section">
-    <h2>What is OpenVZ Leads?</h2>
-    <p>OpenVZ Leads is an autonomous AI sales agent. Once set up, OpenVZ Leads runs on its own: finds people who match your ideal customer, writes personalized cold emails, sends them through your email platform, reads every reply, handles objections, and works toward booking a meeting. You review everything through this dashboard.</p>
-    <p>OpenVZ Leads runs on your Claude Max subscription, so there are no extra AI costs. Everything stays on your machine in one folder.</p>
+    <h2 data-i18n="help.whatTitle">What is OpenVZ Leads?</h2>
+    <p data-i18n="help.whatBody1">OpenVZ Leads is an autonomous AI sales agent. Once set up, OpenVZ Leads runs on its own: finds people who match your ideal customer, writes personalized cold emails, sends them through your email platform, reads every reply, handles objections, and works toward booking a meeting. You review everything through this dashboard.</p>
+    <p data-i18n="help.whatBody2">OpenVZ Leads runs on your Claude Max subscription, so there are no extra AI costs. Everything stays on your machine in one folder.</p>
   </div>
 
   <div class="help-section">
-    <h2>Getting Started</h2>
-    <p>There are three things to do:</p>
-    <pre>1. Go to the Settings tab and enter your Instantly API key
+    <h2 data-i18n="help.startTitle">Getting Started</h2>
+    <p data-i18n="help.startBody">There are three things to do:</p>
+    <pre data-i18n="help.startSteps">1. Go to the Settings tab and enter your Instantly API key
 2. Train OpenVZ Leads on your product (through Claude or the command line)
 3. Go to the Controls tab and click Start</pre>
-    <p>The Setup tab shows you exactly what's done and what still needs to happen.</p>
+    <p data-i18n="help.startNote">The Setup tab shows you exactly what's done and what still needs to happen.</p>
   </div>
 
   <div class="help-section">
-    <h2>Where Everything Lives</h2>
-    <p>Everything OpenVZ Leads needs is inside this one project folder. Nothing is stored elsewhere.</p>
+    <h2 data-i18n="help.whereTitle">Where Everything Lives</h2>
+    <p data-i18n="help.whereBody">Everything OpenVZ Leads needs is inside this one project folder. Nothing is stored elsewhere.</p>
     <div class="table-card" style="padding:6px 4px">
     <table class="file-table">
-      <tr><td>.env</td><td>Your API keys and credentials (never shared or committed)</td></tr>
-      <tr><td>openvz-leads.yaml</td><td>Your product info, target customers, and behavior settings</td></tr>
-      <tr><td>skills/</td><td>Sales knowledge files. Edit these to change how OpenVZ Leads writes and sells.</td></tr>
-      <tr><td>skills/product_knowledge.md</td><td>Everything OpenVZ Leads knows about your product (auto-generated from training)</td></tr>
-      <tr><td>prompts/</td><td>Prompt templates for each agent. Advanced customization.</td></tr>
-      <tr><td>data/leads.db</td><td>Database with all prospects, campaigns, and conversations</td></tr>
-      <tr><td>data/leads.log</td><td>Log file showing what OpenVZ Leads is doing</td></tr>
+      <tr><td>.env</td><td data-i18n="help.file.env">Your API keys and credentials (never shared or committed)</td></tr>
+      <tr><td>openvz-leads.yaml</td><td data-i18n="help.file.yaml">Your product info, target customers, and behavior settings</td></tr>
+      <tr><td>skills/</td><td data-i18n="help.file.skills">Sales knowledge files. Edit these to change how OpenVZ Leads writes and sells.</td></tr>
+      <tr><td>skills/product_knowledge.md</td><td data-i18n="help.file.product">Everything OpenVZ Leads knows about your product (auto-generated from training)</td></tr>
+      <tr><td>prompts/</td><td data-i18n="help.file.prompts">Prompt templates for each agent. Advanced customization.</td></tr>
+      <tr><td>data/leads.db</td><td data-i18n="help.file.db">Database with all prospects, campaigns, and conversations</td></tr>
+      <tr><td>data/leads.log</td><td data-i18n="help.file.log">Log file showing what OpenVZ Leads is doing</td></tr>
     </table>
     </div>
   </div>
 
   <div class="help-section">
-    <h2>Getting Your API Keys</h2>
+    <h2 data-i18n="help.keysTitle">Getting Your API Keys</h2>
 
     <details>
-      <summary>Instantly API Key (required)</summary>
-      <div class="faq-body">
+      <summary data-i18n="help.instantlySummary">Instantly API Key (required)</summary>
+      <div class="faq-body" data-i18n-html="help.instantlyBody">
         <p>Instantly is the email platform OpenVZ Leads uses to send campaigns.</p>
         <p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (you need the Growth plan for API access)</p>
         <p>2. Go to Settings &gt; Integrations</p>
@@ -1437,16 +1446,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     </details>
 
     <details>
-      <summary>LinkedIn Credentials (optional)</summary>
-      <div class="faq-body">
+      <summary data-i18n="help.linkedinSummary">LinkedIn Credentials (optional)</summary>
+      <div class="faq-body" data-i18n-html="help.linkedinBody">
         <p>If you want OpenVZ Leads to find prospects on LinkedIn, enter your LinkedIn email and password. OpenVZ Leads uses a real browser to search LinkedIn like a human would, with random delays and rate limits to avoid detection.</p>
         <p>If you skip this, OpenVZ Leads will find prospects through Google searches and company website scraping instead.</p>
       </div>
     </details>
 
     <details>
-      <summary>Cloudflare Browser Rendering (optional)</summary>
-      <div class="faq-body">
+      <summary data-i18n="help.cloudflareSummary">Cloudflare Browser Rendering (optional)</summary>
+      <div class="faq-body" data-i18n-html="help.cloudflareBody">
         <p>This is only used during product training (when OpenVZ Leads crawls your website to learn about your product). It handles JavaScript-heavy websites that a basic crawler can't read.</p>
         <p>1. Sign up at <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">Cloudflare</a> (paid Workers plan, ~$5/month)</p>
         <p>2. Go to Workers &amp; Pages &gt; Browser Rendering</p>
@@ -1458,26 +1467,26 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </div>
 
   <div class="help-section">
-    <h2>Common Issues</h2>
+    <h2 data-i18n="help.issuesTitle">Common Issues</h2>
 
     <details>
-      <summary>"command not found: openvz-leads"</summary>
-      <div class="faq-body">You need to activate the virtual environment first: <code>source .venv/bin/activate</code></div>
+      <summary data-i18n="help.issue.notFound">"command not found: openvz-leads"</summary>
+      <div class="faq-body" data-i18n-html="help.issue.notFoundBody">You need to activate the virtual environment first: <code>source .venv/bin/activate</code></div>
     </details>
 
     <details>
-      <summary>Instantly API returns 401</summary>
-      <div class="faq-body">Your API key is wrong, or you need the Growth plan (the free plan doesn't include API access). Double-check the key in Settings &gt; Integrations in your Instantly dashboard.</div>
+      <summary data-i18n="help.issue.401">Instantly API returns 401</summary>
+      <div class="faq-body" data-i18n-html="help.issue.401Body">Your API key is wrong, or you need the Growth plan (the free plan doesn't include API access). Double-check the key in Settings &gt; Integrations in your Instantly dashboard.</div>
     </details>
 
     <details>
-      <summary>Claude headless mode fails</summary>
-      <div class="faq-body">Make sure you've run <code>claude login</code> in your terminal and have an active Claude Max subscription. OpenVZ Leads uses your existing subscription, not a separate API key.</div>
+      <summary data-i18n="help.issue.claude">Claude headless mode fails</summary>
+      <div class="faq-body" data-i18n-html="help.issue.claudeBody">Make sure you've run <code>claude login</code> in your terminal and have an active Claude Max subscription. OpenVZ Leads uses your existing subscription, not a separate API key.</div>
     </details>
 
     <details>
-      <summary>OpenVZ Leads isn't finding prospects</summary>
-      <div class="faq-body">Check that your ICP (ideal customer profile) in openvz-leads.yaml has realistic titles, industries, and geography. If LinkedIn is set up, check that the credentials are correct. Check the Activity tab to see what OpenVZ Leads has been trying to do.</div>
+      <summary data-i18n="help.issue.noProspects">OpenVZ Leads isn't finding prospects</summary>
+      <div class="faq-body" data-i18n-html="help.issue.noProspectsBody">Check that your ICP (ideal customer profile) in openvz-leads.yaml has realistic titles, industries, and geography. If LinkedIn is set up, check that the credentials are correct. Check the Activity tab to see what OpenVZ Leads has been trying to do.</div>
     </details>
   </div>
 </div>
@@ -1534,6 +1543,188 @@ const I18N = {
     'brief.blocker': '阻力方',
     'offline.title': '连不上仪表盘服务',
     'offline.copy': '仪表盘进程可能已经停止。用 <b>openvz-leads dashboard</b> 重启后刷新本页。',
+     // ── 界面外壳 ──
+    'status.checking': '检查中…',
+    'status.offline': '连不上',
+    'status.running': 'OpenVZ Leads 正在运行',
+    'status.stopped': 'OpenVZ Leads 已停止',
+    // ── 各分区标题 ──
+    'setup.title': '配置',
+    'setup.sub': 'OpenVZ Leads 开始干活之前需要的全部东西。',
+    'overview.title': '管道总览',
+    'overview.sub': '来自本机数据库的实时计数，会自动刷新。',
+    'companies.title': '公司',
+    'companies.sub': 'OpenVZ Leads 调研过的公司。点一行看它下面的联系人。',
+    'contacts.title': '联系人',
+    'contacts.sub': 'OpenVZ Leads 找到并核实过的人。',
+    'conversations.title': '对话',
+    'conversations.sub': '每一封回信，以及 OpenVZ Leads 是怎么处理的。',
+    'activity.title': '动态',
+    'activity.sub': '各个 agent 做过的每一个动作的流水账。',
+    'settings.title': '设置',
+    'settings.sub': '凭据只存在本机的 <span style="font-family:var(--mono);font-size:12px">.env</span> 里 —— 除了对应的服务本身，不会发去任何地方。',
+    'controls.title': '控制台',
+    'controls.sub': '启动和停止心跳循环，并观察它在做什么。',
+    'help.title': '帮助',
+    'help.sub': 'OpenVZ Leads 是什么、怎么运转，以及常见问题怎么解决。',
+    // ── 配置进度 ──
+    'setup.percent': '完成 {pct}%',
+    'setup.steps': '必做步骤已完成 {done}/{total}',
+    'setup.optionalHead': '可选',
+    'setup.optionalTag': '可选',
+    'setup.check.claude_cli.label': 'Claude Code CLI',
+    'setup.check.claude_cli.help': '这是它的思考引擎，跑在你已有的 Claude 订阅上。到 https://claude.ai/download 装好，然后执行：claude login',
+    'setup.check.venv.label': 'Python 虚拟环境',
+    'setup.check.venv.help': '执行：python3 -m venv .venv && source .venv/bin/activate && pip install -e .',
+    'setup.check.config.label': '你的产品已配置',
+    'setup.check.config.help': '把它指向你自己的网站让它自学：openvz-leads train https://your-company.com —— 也可以让 Claude 带你走一遍。',
+    'setup.check.product_trained.label': '产品知识已写入',
+    'setup.check.product_trained.help': '由 “openvz-leads train <url>” 连同配置一起生成。',
+    'setup.check.serper.label': '搜索 API 密钥（推荐）',
+    'setup.check.serper.help': '没有它，找人只能去爬 DuckDuckGo 和 Bing，很快就会被限流。serper.dev 大约 5 美元 2500 次搜索，不是订阅制。在「设置」里填。',
+    'setup.check.instantly.label': '发信通道（可选）',
+    'setup.check.instantly.help': '只有想让它替你发信才需要。不配也一样：开发信照写、进审核队列、从「导出」拿走。人工审核这一环两种情况下都在。',
+    // ── 设置页 ──
+    'settings.instantlyTitle': 'Instantly（发信平台）',
+    'settings.instantlyLede': '必填。在 <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly 设置 &gt; Integrations</a> 里拿 API 密钥。',
+    'settings.apiKey': 'API 密钥',
+    'settings.instantlyPlaceholder': '填入你的 Instantly API 密钥',
+    'settings.show': '显示',
+    'settings.test': '测试',
+    'settings.save': '保存',
+    'settings.optional': '可选',
+    'settings.linkedinLede': '用于自动在 LinkedIn 上找人。OpenVZ Leads 会像真人一样登录并搜索。',
+    'settings.emailOrUser': '邮箱 / 用户名',
+    'settings.password': '密码',
+    'settings.passwordPlaceholder': '输入密码',
+    'settings.passwordSaved': '密码已保存（要改就输入新的）',
+    'settings.cloudflareLede': '用于产品训练阶段抓取需要执行 JavaScript 的网站。约每月 5 美元。',
+    'settings.accountId': 'Account ID',
+    'settings.apiToken': 'API Token',
+    'settings.cfAccountPlaceholder': '你的 Cloudflare Account ID',
+    'settings.cfTokenPlaceholder': '你的 Cloudflare API Token',
+    'settings.savedInstantly': 'Instantly API 密钥已保存。',
+    'settings.savedLinkedIn': 'LinkedIn 凭据已保存。',
+    'settings.savedCloudflare': 'Cloudflare 凭据已保存。',
+    'settings.saveFailed': '保存失败 —— 仪表盘还在运行吗？',
+    'settings.testing': '正在测试…',
+    'settings.testUnreachable': '连不上仪表盘服务。',
+    // ── 控制台 ──
+    'controls.agent': 'Agent',
+    'controls.start': '启动 OpenVZ Leads',
+    'controls.stop': '停止 OpenVZ Leads',
+    'controls.logs': '最近日志',
+    'controls.refreshLogs': '刷新日志',
+    'controls.noLogs': '还没有日志。启动 OpenVZ Leads 后这里会有动静。',
+    'controls.running': '运行中',
+    'controls.stopped': '已停止',
+    'controls.startedAt': '启动于',
+    'controls.idleNote': 'OpenVZ Leads 每隔几分钟醒一次，把该做的做掉，然后接着睡。',
+    'controls.started': 'OpenVZ Leads 已启动。',
+    'controls.wasStopped': 'OpenVZ Leads 已停止。',
+    'controls.startFailed': '启动失败。',
+    'controls.stopFailed': '停止失败。',
+    // ── 总览 ──
+    'stats.prospects': '联系人',
+    'stats.campaigns': '活动',
+    'stats.conversations': '对话',
+    'stats.actions': '已记录动作',
+    'stats.claudeToday': '今日 Claude 调用',
+    'stats.noneYet': '暂无',
+    'stats.empty': '还没有管道数据',
+    'stats.emptyCopy': '到 <b>控制台</b> 标签页把 OpenVZ Leads 启动起来，它就会自己开始找人、写信、发信。',
+    // ── 公司 ──
+    'companies.empty': '还没有公司',
+    'companies.emptyCopy': 'Scout agent 还没调研过任何公司。先把<b>配置</b>做完，再到<b>控制台</b>启动 OpenVZ Leads。',
+    'companies.col.name': '公司',
+    'companies.col.domain': '域名',
+    'companies.col.industry': '行业',
+    'companies.col.size': '规模',
+    'companies.col.location': '地区',
+    'companies.col.contacts': '联系人数',
+    'companies.col.source': '来源',
+    'companies.col.added': '加入时间',
+    'companies.contactsOf': '{company} —— 联系人',
+    'companies.back': '&larr; 返回公司列表',
+    'companies.noContacts': '这家公司下面还没有联系人。',
+    // ── 联系人 ──
+    'contacts.empty': '还没有联系人',
+    'contacts.emptyCopy': 'OpenVZ Leads 还没找到人。跑起来之后，Scout agent 会按 <b>openvz-leads.yaml</b> 里的理想客户画像去网上找人。',
+    'contacts.col.name': '姓名',
+    'contacts.col.title': '职位',
+    'contacts.col.company': '公司',
+    'contacts.col.email': '邮箱',
+    'contacts.col.phone': '电话',
+    'contacts.col.linkedin': 'LinkedIn',
+    'contacts.col.status': '状态',
+    'contacts.col.source': '来源',
+    'contacts.col.added': '加入时间',
+    'contacts.profile': '主页',
+    'contacts.feedback': '反馈',
+    // ── 活动 ──
+    'campaigns.empty': '还没有活动',
+    'campaigns.emptyCopy': 'Writer agent 还没起草任何序列。等 OpenVZ Leads 攒够打过分的联系人，它会自己开始写。',
+    'campaigns.untitled': '未命名活动',
+    'campaigns.prospects': '{count} 位联系人',
+    'campaigns.sendAfter': '{days} 天后发送',
+    'campaigns.noSteps': '这个活动里还没有邮件。',
+    'campaigns.emailN': '邮件 {step}',
+    // ── 对话 ──
+    'conversations.empty': '还没有对话',
+    'conversations.emptyCopy': '目前还没有人回信。有人回了之后，Handler agent 会给每封回信分类并作答，每个会话都会出现在这里。',
+    'conversations.unknown': '未知',
+    'conversations.noMessages': '这个会话里还没有消息。',
+    // ── 动态 ──
+    'activity.empty': '还没有动态',
+    'activity.emptyCopy': 'OpenVZ Leads 还没做过任何动作。找到的每个人、写出的每封信、处理的每条回复，都会在发生的那一刻出现在这里。',
+    // ── 审核 ──
+    'review.sendsImmediately': '立即发送',
+    'review.daysLater': '{days} 天后',
+    'review.emailN': '邮件 {step}',
+    'review.emailCount': '{count} 封邮件',
+    'review.recipientCount': '{count} 位收件人',
+    'review.recipientsWithCount': '收件人（{count}）',
+    // ── 导出 ──
+    'export.failed': '导出失败',
+    // ── 反馈 ──
+    'feedback.prompt': '写下你的反馈：',
+    'feedback.contact': '对这位联系人的反馈：',
+    'feedback.campaign': '对这个活动的反馈：',
+    'feedback.saved': '反馈已保存，OpenVZ Leads 会把它考虑进去。',
+    'feedback.failed': '反馈没能保存。',
+    // ── 帮助页 ──
+    'help.whatTitle': 'OpenVZ Leads 是什么？',
+    'help.whatBody1': 'OpenVZ Leads 是一个自主运行的 AI 销售 agent。配置好之后它自己跑：找到符合你理想客户画像的人，写出个性化的开发信，通过你的发信平台发出去，读每一封回信，处理异议，一路推到约上会。所有环节你都在这个仪表盘里过目。',
+    'help.whatBody2': 'OpenVZ Leads 跑在你的 Claude Max 订阅上，没有额外的模型费用。所有东西都留在你自己的机器上，就在一个文件夹里。',
+    'help.startTitle': '怎么开始',
+    'help.startBody': '一共三件事：',
+    'help.startSteps': '1. 到「设置」标签页填上你的 Instantly API 密钥\n2. 让 OpenVZ Leads 学习你的产品（通过 Claude 或命令行）\n3. 到「控制台」标签页点启动',
+    'help.startNote': '「配置」标签页会明确告诉你哪些做完了、还差什么。',
+    'help.whereTitle': '东西都在哪',
+    'help.whereBody': 'OpenVZ Leads 需要的一切都在这一个项目文件夹里，不会存到别处。',
+    'help.file.env': '你的 API 密钥和凭据（不会外传，也不会提交）',
+    'help.file.yaml': '你的产品信息、目标客户和行为设置',
+    'help.file.skills': '销售知识文件。改这些就能改变它怎么写、怎么卖。',
+    'help.file.product': 'OpenVZ Leads 关于你产品的全部认知（训练时自动生成）',
+    'help.file.prompts': '每个 agent 的提示词模板。进阶定制用。',
+    'help.file.db': '数据库，装着全部联系人、活动和对话',
+    'help.file.log': '日志文件，看它此刻在做什么',
+    'help.keysTitle': '怎么拿到这些密钥',
+    'help.instantlySummary': 'Instantly API 密钥（必填）',
+    'help.instantlyBody': '<p>Instantly 是 OpenVZ Leads 用来发送活动的邮件平台。</p><p>1. 到 <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> 注册（要 Growth 套餐才有 API 权限）</p><p>2. 进 Settings &gt; Integrations</p><p>3. 复制 API 密钥</p><p>4. 粘贴到这里的「设置」标签页</p>',
+    'help.linkedinSummary': 'LinkedIn 账号（可选）',
+    'help.linkedinBody': '<p>如果你想让 OpenVZ Leads 去 LinkedIn 上找人，就填上你的 LinkedIn 邮箱和密码。它用真实浏览器像真人那样搜索，带随机延时和频率限制，避免被识别。</p><p>不填也行，它会改用 Google 搜索和公司官网抓取来找人。</p>',
+    'help.cloudflareSummary': 'Cloudflare 浏览器渲染（可选）',
+    'help.cloudflareBody': '<p>只在产品训练阶段用得上（也就是 OpenVZ Leads 抓你的网站学习你的产品那一步）。它能处理基础爬虫读不了的重 JavaScript 网站。</p><p>1. 到 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">Cloudflare</a> 注册（付费 Workers 套餐，约每月 5 美元）</p><p>2. 进 Workers &amp; Pages &gt; Browser Rendering</p><p>3. 创建一个带 Browser Rendering Edit 权限的 API token</p><p>4. 把 Account ID 和 API Token 填到「设置」标签页</p><p>不配也行，它会用内置爬虫，对大多数网站够用，只是不能执行 JavaScript。</p>',
+    'help.issuesTitle': '常见问题',
+    'help.issue.notFound': '“command not found: openvz-leads”',
+    'help.issue.notFoundBody': '要先激活虚拟环境：<code>source .venv/bin/activate</code>',
+    'help.issue.401': 'Instantly API 返回 401',
+    'help.issue.401Body': '密钥不对，或者你需要 Growth 套餐（免费套餐没有 API 权限）。到 Instantly 后台的 Settings &gt; Integrations 里再核对一遍密钥。',
+    'help.issue.claude': 'Claude 无头模式失败',
+    'help.issue.claudeBody': '确认你已经在终端跑过 <code>claude login</code>，并且 Claude Max 订阅在有效期内。OpenVZ Leads 用的是你已有的订阅，不是另外的 API 密钥。',
+    'help.issue.noProspects': 'OpenVZ Leads 找不到人',
+    'help.issue.noProspectsBody': '检查 openvz-leads.yaml 里的理想客户画像，职位、行业和地区是否现实。如果配了 LinkedIn，检查账号密码对不对。再到「动态」标签页看看它一直在试着做什么。',
   },
   en: {
     'brand.tagline': 'Find them. Understand them. Reach them.',
@@ -1573,6 +1764,188 @@ const I18N = {
     'brief.blocker': 'Blocker',
     'offline.title': "Dashboard can't reach the server",
     'offline.copy': 'The dashboard process may have stopped. Restart it with <b>openvz-leads dashboard</b> and refresh this page.',
+     // ── Chrome ──
+    'status.checking': 'Checking…',
+    'status.offline': 'Offline',
+    'status.running': 'OpenVZ Leads is running',
+    'status.stopped': 'OpenVZ Leads is stopped',
+    // ── Section heads ──
+    'setup.title': 'Setup',
+    'setup.sub': "Everything OpenVZ Leads needs before it can start closing.",
+    'overview.title': 'Pipeline Overview',
+    'overview.sub': "Live counts from OpenVZ Leads' local database. Refreshes automatically.",
+    'companies.title': 'Companies',
+    'companies.sub': 'Organizations OpenVZ Leads has researched. Click a row to see its contacts.',
+    'contacts.title': 'Contacts',
+    'contacts.sub': 'People OpenVZ Leads has found and verified.',
+    'conversations.title': 'Conversations',
+    'conversations.sub': 'Every reply, and how OpenVZ Leads handled it.',
+    'activity.title': 'Activity',
+    'activity.sub': "A running log of every action OpenVZ Leads' agents have taken.",
+    'settings.title': 'Settings',
+    'settings.sub': 'Credentials are stored locally in <span style="font-family:var(--mono);font-size:12px">.env</span> — never sent anywhere except the services themselves.',
+    'controls.title': 'Controls',
+    'controls.sub': "Start and stop OpenVZ Leads' heartbeat loop, and watch what it's doing.",
+    'help.title': 'Help',
+    'help.sub': 'What OpenVZ Leads is, how it works, and how to fix the usual problems.',
+    // ── Setup progress ──
+    'setup.percent': '{pct}% complete',
+    'setup.steps': '{done} of {total} required steps done',
+    'setup.optionalHead': 'Optional',
+    'setup.optionalTag': 'optional',
+    'setup.check.claude_cli.label': 'Claude Code CLI',
+    'setup.check.claude_cli.help': 'This is the thinking engine, and it runs on the Claude subscription you already have. Install it from https://claude.ai/download, then run: claude login',
+    'setup.check.venv.label': 'Python virtual environment',
+    'setup.check.venv.help': 'Run: python3 -m venv .venv && source .venv/bin/activate && pip install -e .',
+    'setup.check.config.label': 'Your product configured',
+    'setup.check.config.help': 'Point it at your own site and let it learn: openvz-leads train https://your-company.com — or ask Claude to walk you through it.',
+    'setup.check.product_trained.label': 'Product knowledge written',
+    'setup.check.product_trained.help': "Generated by 'openvz-leads train <url>' together with the config.",
+    'setup.check.serper.label': 'Search API key (recommended)',
+    'setup.check.serper.help': 'Without one, prospecting scrapes DuckDuckGo and Bing and gets rate-limited. serper.dev is about $5 per 2,500 searches, and is not a subscription. Add it in Settings.',
+    'setup.check.instantly.label': 'Sending provider (optional)',
+    'setup.check.instantly.help': 'Only needed if you want it to send for you. Without it, outreach is drafted, queued for your review, and exported from the Export tab. Human review stays on either way.',
+    // ── Settings ──
+    'settings.instantlyTitle': 'Instantly (Email Platform)',
+    'settings.instantlyLede': 'Required. Get your API key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a>.',
+    'settings.apiKey': 'API Key',
+    'settings.instantlyPlaceholder': 'Enter your Instantly API key',
+    'settings.show': 'Show',
+    'settings.test': 'Test',
+    'settings.save': 'Save',
+    'settings.optional': 'optional',
+    'settings.linkedinLede': 'For automated LinkedIn prospecting. OpenVZ Leads logs in and searches like a human.',
+    'settings.emailOrUser': 'Email / Username',
+    'settings.password': 'Password',
+    'settings.passwordPlaceholder': 'Enter password',
+    'settings.passwordSaved': 'Password saved (enter new to change)',
+    'settings.cloudflareLede': 'For deep website crawling with JavaScript rendering during product training. ~$5/month.',
+    'settings.accountId': 'Account ID',
+    'settings.apiToken': 'API Token',
+    'settings.cfAccountPlaceholder': 'Your Cloudflare Account ID',
+    'settings.cfTokenPlaceholder': 'Your Cloudflare API Token',
+    'settings.savedInstantly': 'Instantly API key saved.',
+    'settings.savedLinkedIn': 'LinkedIn credentials saved.',
+    'settings.savedCloudflare': 'Cloudflare credentials saved.',
+    'settings.saveFailed': 'Save failed — is the dashboard still running?',
+    'settings.testing': 'Testing…',
+    'settings.testUnreachable': 'Could not reach the dashboard server.',
+    // ── Controls ──
+    'controls.agent': 'Agent',
+    'controls.start': 'Start OpenVZ Leads',
+    'controls.stop': 'Stop OpenVZ Leads',
+    'controls.logs': 'Recent Logs',
+    'controls.refreshLogs': 'Refresh Logs',
+    'controls.noLogs': 'No logs yet. Start OpenVZ Leads to see activity.',
+    'controls.running': 'Running',
+    'controls.stopped': 'Stopped',
+    'controls.startedAt': 'started',
+    'controls.idleNote': 'OpenVZ Leads wakes every few minutes, does what needs doing, and sleeps.',
+    'controls.started': 'OpenVZ Leads started.',
+    'controls.wasStopped': 'OpenVZ Leads stopped.',
+    'controls.startFailed': 'Failed to start.',
+    'controls.stopFailed': 'Failed to stop.',
+    // ── Overview ──
+    'stats.prospects': 'Prospects',
+    'stats.campaigns': 'Campaigns',
+    'stats.conversations': 'Conversations',
+    'stats.actions': 'Actions Logged',
+    'stats.claudeToday': 'Claude calls today',
+    'stats.noneYet': 'none yet',
+    'stats.empty': 'No pipeline data yet',
+    'stats.emptyCopy': 'Start OpenVZ Leads from the <b>Controls</b> tab and it will begin prospecting, writing, and sending on its own.',
+    // ── Companies ──
+    'companies.empty': 'No companies yet',
+    'companies.emptyCopy': "OpenVZ Leads' Scout agent hasn't researched any companies. Finish <b>Setup</b>, then start OpenVZ Leads from the <b>Controls</b> tab.",
+    'companies.col.name': 'Company',
+    'companies.col.domain': 'Domain',
+    'companies.col.industry': 'Industry',
+    'companies.col.size': 'Size',
+    'companies.col.location': 'Location',
+    'companies.col.contacts': 'Contacts',
+    'companies.col.source': 'Source',
+    'companies.col.added': 'Added',
+    'companies.contactsOf': '{company} — Contacts',
+    'companies.back': '&larr; Back to Companies',
+    'companies.noContacts': 'No contacts found at this company yet.',
+    // ── Contacts ──
+    'contacts.empty': 'No contacts yet',
+    'contacts.emptyCopy': "OpenVZ Leads hasn't found any prospects. Once it's running, the Scout agent searches the web for people matching your ideal customer profile in <b>openvz-leads.yaml</b>.",
+    'contacts.col.name': 'Name',
+    'contacts.col.title': 'Title',
+    'contacts.col.company': 'Company',
+    'contacts.col.email': 'Email',
+    'contacts.col.phone': 'Phone',
+    'contacts.col.linkedin': 'LinkedIn',
+    'contacts.col.status': 'Status',
+    'contacts.col.source': 'Source',
+    'contacts.col.added': 'Added',
+    'contacts.profile': 'Profile',
+    'contacts.feedback': 'Feedback',
+    // ── Campaigns ──
+    'campaigns.empty': 'No campaigns yet',
+    'campaigns.emptyCopy': "The Writer agent hasn't drafted any sequences. It kicks in automatically once OpenVZ Leads has scored prospects to write for.",
+    'campaigns.untitled': 'Untitled Campaign',
+    'campaigns.prospects': '{count} prospect(s)',
+    'campaigns.sendAfter': 'send after {days} days',
+    'campaigns.noSteps': 'No email steps in this campaign.',
+    'campaigns.emailN': 'Email {step}',
+    // ── Conversations ──
+    'conversations.empty': 'No conversations yet',
+    'conversations.emptyCopy': 'No prospects have replied so far. When they do, the Handler agent classifies each reply and responds — every thread shows up here.',
+    'conversations.unknown': 'Unknown',
+    'conversations.noMessages': 'No messages in this thread yet.',
+    // ── Activity ──
+    'activity.empty': 'No activity yet',
+    'activity.emptyCopy': "OpenVZ Leads hasn't taken any actions. Every prospect found, email written, and reply handled will appear here the moment it happens.",
+    // ── Review ──
+    'review.sendsImmediately': 'sends immediately',
+    'review.daysLater': '{days} day(s) later',
+    'review.emailN': 'Email {step}',
+    'review.emailCount': '{count} email(s)',
+    'review.recipientCount': '{count} recipient(s)',
+    'review.recipientsWithCount': 'Recipients ({count})',
+    // ── Export ──
+    'export.failed': 'Export failed',
+    // ── Feedback ──
+    'feedback.prompt': 'Add your feedback:',
+    'feedback.contact': 'Feedback on this contact:',
+    'feedback.campaign': 'Leave feedback on this campaign:',
+    'feedback.saved': 'Feedback saved. OpenVZ Leads will take it into account.',
+    'feedback.failed': 'Could not save feedback.',
+    // ── Help ──
+    'help.whatTitle': 'What is OpenVZ Leads?',
+    'help.whatBody1': 'OpenVZ Leads is an autonomous AI sales agent. Once set up, OpenVZ Leads runs on its own: finds people who match your ideal customer, writes personalized cold emails, sends them through your email platform, reads every reply, handles objections, and works toward booking a meeting. You review everything through this dashboard.',
+    'help.whatBody2': 'OpenVZ Leads runs on your Claude Max subscription, so there are no extra AI costs. Everything stays on your machine in one folder.',
+    'help.startTitle': 'Getting Started',
+    'help.startBody': 'There are three things to do:',
+    'help.startSteps': '1. Go to the Settings tab and enter your Instantly API key\n2. Train OpenVZ Leads on your product (through Claude or the command line)\n3. Go to the Controls tab and click Start',
+    'help.startNote': "The Setup tab shows you exactly what's done and what still needs to happen.",
+    'help.whereTitle': 'Where Everything Lives',
+    'help.whereBody': 'Everything OpenVZ Leads needs is inside this one project folder. Nothing is stored elsewhere.',
+    'help.file.env': 'Your API keys and credentials (never shared or committed)',
+    'help.file.yaml': 'Your product info, target customers, and behavior settings',
+    'help.file.skills': 'Sales knowledge files. Edit these to change how OpenVZ Leads writes and sells.',
+    'help.file.product': 'Everything OpenVZ Leads knows about your product (auto-generated from training)',
+    'help.file.prompts': 'Prompt templates for each agent. Advanced customization.',
+    'help.file.db': 'Database with all prospects, campaigns, and conversations',
+    'help.file.log': 'Log file showing what OpenVZ Leads is doing',
+    'help.keysTitle': 'Getting Your API Keys',
+    'help.instantlySummary': 'Instantly API Key (required)',
+    'help.instantlyBody': '<p>Instantly is the email platform OpenVZ Leads uses to send campaigns.</p><p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (you need the Growth plan for API access)</p><p>2. Go to Settings &gt; Integrations</p><p>3. Copy your API key</p><p>4. Paste it in the Settings tab here</p>',
+    'help.linkedinSummary': 'LinkedIn Credentials (optional)',
+    'help.linkedinBody': '<p>If you want OpenVZ Leads to find prospects on LinkedIn, enter your LinkedIn email and password. OpenVZ Leads uses a real browser to search LinkedIn like a human would, with random delays and rate limits to avoid detection.</p><p>If you skip this, OpenVZ Leads will find prospects through Google searches and company website scraping instead.</p>',
+    'help.cloudflareSummary': 'Cloudflare Browser Rendering (optional)',
+    'help.cloudflareBody': "<p>This is only used during product training (when OpenVZ Leads crawls your website to learn about your product). It handles JavaScript-heavy websites that a basic crawler can't read.</p><p>1. Sign up at <a href=\"https://dash.cloudflare.com\" target=\"_blank\" rel=\"noopener\">Cloudflare</a> (paid Workers plan, ~$5/month)</p><p>2. Go to Workers &amp; Pages &gt; Browser Rendering</p><p>3. Create an API token with Browser Rendering Edit permissions</p><p>4. Enter your Account ID and API Token in the Settings tab</p><p>Without this, OpenVZ Leads uses a built-in crawler that works fine for most websites but can't render JavaScript.</p>",
+    'help.issuesTitle': 'Common Issues',
+    'help.issue.notFound': '"command not found: openvz-leads"',
+    'help.issue.notFoundBody': 'You need to activate the virtual environment first: <code>source .venv/bin/activate</code>',
+    'help.issue.401': 'Instantly API returns 401',
+    'help.issue.401Body': "Your API key is wrong, or you need the Growth plan (the free plan doesn't include API access). Double-check the key in Settings &gt; Integrations in your Instantly dashboard.",
+    'help.issue.claude': 'Claude headless mode fails',
+    'help.issue.claudeBody': "Make sure you've run <code>claude login</code> in your terminal and have an active Claude Max subscription. OpenVZ Leads uses your existing subscription, not a separate API key.",
+    'help.issue.noProspects': "OpenVZ Leads isn't finding prospects",
+    'help.issue.noProspectsBody': 'Check that your ICP (ideal customer profile) in openvz-leads.yaml has realistic titles, industries, and geography. If LinkedIn is set up, check that the credentials are correct. Check the Activity tab to see what OpenVZ Leads has been trying to do.',
   },
 };
 
@@ -1584,10 +1957,28 @@ function t(key) {
   return table[key] !== undefined ? table[key] : (I18N.en[key] !== undefined ? I18N.en[key] : key);
 }
 
+// Interpolating variant: tf('setup.percent', {pct: 40}). Placeholders can be
+// reordered in a translation, which Chinese needs — '{done}/{total}' does not
+// sit where 'X of Y' does.
+function tf(key, params) {
+  return String(t(key)).replace(/\{(\w+)\}/g, (whole, name) =>
+    Object.prototype.hasOwnProperty.call(params || {}, name) ? String(params[name]) : whole
+  );
+}
+
 function applyLang() {
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.getAttribute('data-i18n'));
+  });
+  // Markup-bearing copy — a link, a <code>, the .env chip. textContent would
+  // print the tags, so these entries carry their own HTML. Every one of them
+  // is authored in this file; none comes from the database or the network.
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    el.innerHTML = t(el.getAttribute('data-i18n-html'));
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder')));
   });
   const btn = document.getElementById('lang-btn');
   if (btn) btn.textContent = LANG === 'zh' ? 'EN' : '中文';
@@ -1620,7 +2011,8 @@ function formatDate(d) {
   try {
     const dt = new Date(d);
     if (isNaN(dt)) return escHtml(d);
-    return dt.toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    const locale = LANG === 'zh' ? 'zh-CN' : 'en-US';
+    return dt.toLocaleString(locale, {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   } catch { return escHtml(d); }
 }
 
@@ -1817,10 +2209,10 @@ async function loadReview() {
     const steps = (c.sequence || []).map(s => {
       const delay = Number(s.delay_days || 0);
       const when = delay === 0
-        ? (LANG === 'zh' ? '立即发送' : 'sends immediately')
-        : (LANG === 'zh' ? delay + ' 天后' : delay + ' day(s) later');
+        ? t('review.sendsImmediately')
+        : tf('review.daysLater', {days: delay});
       return '<div class="email-step">' +
-        '<div class="when">' + escHtml((LANG === 'zh' ? '邮件 ' : 'Email ') + (s.step || '?')) +
+        '<div class="when">' + escHtml(tf('review.emailN', {step: s.step || '?'})) +
           ' &middot; ' + escHtml(when) + '</div>' +
         '<div class="subject">' + escHtml(s.subject || '') + '</div>' +
         '<div class="body-text">' + escHtml(s.body || '') + '</div>' +
@@ -1835,7 +2227,7 @@ async function loadReview() {
 
     const recipientBlock = recipients
       ? '<div class="brief-block" style="margin-top:18px"><h4>' +
-        escHtml(t('review.recipients')) + ' (' + (c.prospect_ids || []).length + ')</h4>' +
+        escHtml(tf('review.recipientsWithCount', {count: (c.prospect_ids || []).length})) + '</h4>' +
         '<ul>' + recipients + '</ul></div>'
       : '';
 
@@ -1843,10 +2235,9 @@ async function loadReview() {
     return '<div class="review-card" id="rc-' + id + '">' +
       '<div class="head"><div>' +
         '<div class="title">' + escHtml(c.name || '—') + '</div>' +
-        '<div class="meta">' + (c.sequence || []).length +
-          (LANG === 'zh' ? ' 封邮件 · ' : ' email(s) · ') +
-          (c.prospect_ids || []).length +
-          (LANG === 'zh' ? ' 位收件人' : ' recipient(s)') + '</div>' +
+        '<div class="meta">' +
+          escHtml(tf('review.emailCount', {count: (c.sequence || []).length})) + ' &middot; ' +
+          escHtml(tf('review.recipientCount', {count: (c.prospect_ids || []).length})) + '</div>' +
       '</div>' + badge(c.status) + '</div>' +
       '<div class="body">' + steps + recipientBlock + '</div>' +
       '<div class="review-actions">' +
@@ -1910,7 +2301,7 @@ async function runExport(dataset, format) {
   });
   if (!res.ok) {
     out.textContent = '';
-    showToast((res.data && res.data.error) || 'Export failed', 'error');
+    showToast((res.data && res.data.error) || t('export.failed'), 'error');
     return;
   }
   out.textContent = t('export.done') + res.data.path;
@@ -1931,10 +2322,21 @@ async function loadSetupStatus() {
 
   document.getElementById('setup-progress').innerHTML =
     '<div class="progress-label">' +
-      '<span class="pct">' + pct + '% complete</span>' +
-      '<span class="text">' + data.completed + ' of ' + data.total_required + ' required steps done</span>' +
+      '<span class="pct">' + escHtml(tf('setup.percent', {pct: pct})) + '</span>' +
+      '<span class="text">' +
+        escHtml(tf('setup.steps', {done: data.completed, total: data.total_required})) + '</span>' +
     '</div>' +
     '<div class="progress-bar"><div class="progress-fill ' + color + '" style="width:' + pct + '%"></div></div>';
+
+  // The checklist comes from /api/setup-status in English. The check ids are
+  // stable, so the label and help are looked up here and the server's text is
+  // the fallback — a check added server-side still renders, untranslated,
+  // rather than showing a bare key.
+  const checkText = (c, field) => {
+    const key = 'setup.check.' + c.id + '.' + field;
+    const translated = t(key);
+    return translated === key ? (c[field] || '') : translated;
+  };
 
   const renderCheck = (c, optional) => {
     const icon = c.done
@@ -1942,16 +2344,16 @@ async function loadSetupStatus() {
       : '<span class="check-icon pending">&#9679;</span>';
     return '<div class="check-item">' + icon +
       '<div class="check-info">' +
-        '<div class="check-label ' + (c.done ? 'done' : '') + '">' + escHtml(c.label) +
-          (optional ? ' <span class="optional-tag">optional</span>' : '') + '</div>' +
-        (!c.done ? '<div class="check-help">' + escHtml(c.help) + '</div>' : '') +
+        '<div class="check-label ' + (c.done ? 'done' : '') + '">' + escHtml(checkText(c, 'label')) +
+          (optional ? ' <span class="optional-tag">' + escHtml(t('setup.optionalTag')) + '</span>' : '') + '</div>' +
+        (!c.done ? '<div class="check-help">' + escHtml(checkText(c, 'help')) + '</div>' : '') +
       '</div></div>';
   };
 
   let html = data.checks.filter(c => c.required).map(c => renderCheck(c, false)).join('');
   const optional = data.checks.filter(c => !c.required);
   if (optional.length) {
-    html += '<div class="subhead">Optional</div>';
+    html += '<div class="subhead">' + escHtml(t('setup.optionalHead')) + '</div>';
     html += optional.map(c => renderCheck(c, true)).join('');
   }
   document.getElementById('setup-checklist').innerHTML = html;
@@ -1968,7 +2370,7 @@ async function loadSettings() {
   document.getElementById('cf-account-id').value = data.cloudflare_account_id || '';
   document.getElementById('cf-api-token').value = '';
   if (data.linkedin_password_set) {
-    document.getElementById('linkedin-password').placeholder = 'Password saved (enter new to change)';
+    document.getElementById('linkedin-password').placeholder = t('settings.passwordSaved');
   }
 }
 
@@ -1978,37 +2380,37 @@ async function saveEnv(payload, okMsg) {
     body: JSON.stringify(payload)
   });
   if (data && data.success) showToast(okMsg, 'success');
-  else showToast((data && data.message) || 'Save failed — is the dashboard still running?', 'error');
+  else showToast((data && data.message) || t('settings.saveFailed'), 'error');
 }
 
 function saveInstantly() {
-  saveEnv({INSTANTLY_API_KEY: document.getElementById('instantly-key').value.trim()}, 'Instantly API key saved.');
+  saveEnv({INSTANTLY_API_KEY: document.getElementById('instantly-key').value.trim()}, t('settings.savedInstantly'));
 }
 
 function saveLinkedIn() {
   const payload = {LINKEDIN_EMAIL: document.getElementById('linkedin-email').value.trim()};
   const pass = document.getElementById('linkedin-password').value;
   if (pass) payload.LINKEDIN_PASSWORD = pass;
-  saveEnv(payload, 'LinkedIn credentials saved.');
+  saveEnv(payload, t('settings.savedLinkedIn'));
 }
 
 function saveCloudflare() {
   saveEnv({
     CLOUDFLARE_ACCOUNT_ID: document.getElementById('cf-account-id').value.trim(),
     CLOUDFLARE_API_TOKEN: document.getElementById('cf-api-token').value.trim()
-  }, 'Cloudflare credentials saved.');
+  }, t('settings.savedCloudflare'));
 }
 
 async function testInstantly() {
   const key = document.getElementById('instantly-key').value.trim();
   const el = document.getElementById('instantly-test-result');
-  el.innerHTML = '<div class="test-result pending">Testing&hellip;</div>';
+  el.innerHTML = '<div class="test-result pending">' + escHtml(t('settings.testing')) + '</div>';
   const data = await api('/api/settings/test-instantly', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({api_key: key})
   });
   if (!data) {
-    el.innerHTML = '<div class="test-result error">Could not reach the dashboard server.</div>';
+    el.innerHTML = '<div class="test-result error">' + escHtml(t('settings.testUnreachable')) + '</div>';
     return;
   }
   el.innerHTML = '<div class="test-result ' + (data.success ? 'success' : 'error') + '">' + escHtml(data.message) + '</div>';
@@ -2023,25 +2425,25 @@ async function loadAgentStatus() {
 
   if (!data) {
     headerDot.className = 'status-dot offline';
-    headerText.textContent = 'Offline';
+    headerText.textContent = t('status.offline');
     return;
   }
   const running = !!data.running;
 
   headerDot.className = 'status-dot ' + (running ? 'running' : 'stopped');
-  headerText.textContent = running ? 'OpenVZ Leads is running' : 'OpenVZ Leads is stopped';
+  headerText.textContent = running ? t('status.running') : t('status.stopped');
   document.getElementById('control-dot').className = 'dot ' + (running ? 'running' : 'stopped');
   const label = document.getElementById('control-label');
   label.className = 'label ' + (running ? 'running' : 'stopped');
-  label.textContent = running ? 'Running' : 'Stopped';
+  label.textContent = running ? t('controls.running') : t('controls.stopped');
 
   const meta = document.getElementById('control-meta');
   if (running && data.pid) {
     let info = 'PID ' + escHtml(String(data.pid));
-    if (data.started_at) info += ' &middot; started ' + formatDate(data.started_at);
+    if (data.started_at) info += ' &middot; ' + escHtml(t('controls.startedAt')) + ' ' + formatDate(data.started_at);
     meta.innerHTML = info;
   } else {
-    meta.innerHTML = 'OpenVZ Leads wakes every few minutes, does what needs doing, and sleeps.';
+    meta.innerHTML = escHtml(t('controls.idleNote'));
   }
 
   document.getElementById('btn-start').style.display = running ? 'none' : '';
@@ -2052,8 +2454,8 @@ async function startAgent() {
   const btn = document.getElementById('btn-start');
   btn.disabled = true;
   const data = await api('/api/agent/start', {method: 'POST'});
-  if (data && data.success) showToast('OpenVZ Leads started.', 'success');
-  else showToast((data && data.message) || 'Failed to start.', 'error');
+  if (data && data.success) showToast(t('controls.started'), 'success');
+  else showToast((data && data.message) || t('controls.startFailed'), 'error');
   btn.disabled = false;
   loadAgentStatus();
 }
@@ -2062,8 +2464,8 @@ async function stopAgent() {
   const btn = document.getElementById('btn-stop');
   btn.disabled = true;
   const data = await api('/api/agent/stop', {method: 'POST'});
-  if (data && data.success) showToast('OpenVZ Leads stopped.', 'success');
-  else showToast((data && data.message) || 'Failed to stop.', 'error');
+  if (data && data.success) showToast(t('controls.wasStopped'), 'success');
+  else showToast((data && data.message) || t('controls.stopFailed'), 'error');
   btn.disabled = false;
   loadAgentStatus();
 }
@@ -2076,7 +2478,7 @@ async function loadLogs() {
     el.textContent = data.lines.join('\n');
     if (stick) el.scrollTop = el.scrollHeight;
   } else {
-    el.textContent = 'No logs yet. Start OpenVZ Leads to see activity.';
+    el.textContent = t('controls.noLogs');
   }
 }
 
@@ -2087,14 +2489,13 @@ async function loadStats() {
   const data = await api('/api/stats');
   if (!data) { grid.innerHTML = offlineState(); return; }
   if (data.error) {
-    grid.innerHTML = emptyState('&#9670;', 'No pipeline data yet',
-      'Start OpenVZ Leads from the <b>Controls</b> tab and it will begin prospecting, writing, and sending on its own.');
+    grid.innerHTML = emptyState('&#9670;', t('stats.empty'), t('stats.emptyCopy'));
     return;
   }
   const p = data.prospects || {}, c = data.campaigns || {}, v = data.conversations || {};
   const chips = (map) => {
     const entries = Object.entries(map || {});
-    if (!entries.length) return '<span class="chip muted">none yet</span>';
+    if (!entries.length) return '<span class="chip muted">' + escHtml(t('stats.noneYet')) + '</span>';
     return entries.map(([k, n]) =>
       '<span class="chip">' + escHtml(k) + ' <b>' + escHtml(String(n)) + '</b></span>'
     ).join('');
@@ -2105,11 +2506,12 @@ async function loadStats() {
     '<div class="breakdown">' + breakdown + '</div></div>';
 
   grid.innerHTML =
-    card('Prospects', p.total || 0, chips(p.by_status)) +
-    card('Campaigns', c.total || 0, chips(c.by_status)) +
-    card('Conversations', v.total || 0, chips(v.by_status)) +
-    card('Actions Logged', data.actions_total || 0,
-      '<span class="chip">Claude calls today <b>' + escHtml(String(data.claude_calls_today || 0)) + '</b></span>');
+    card(escHtml(t('stats.prospects')), p.total || 0, chips(p.by_status)) +
+    card(escHtml(t('stats.campaigns')), c.total || 0, chips(c.by_status)) +
+    card(escHtml(t('stats.conversations')), v.total || 0, chips(v.by_status)) +
+    card(escHtml(t('stats.actions')), data.actions_total || 0,
+      '<span class="chip">' + escHtml(t('stats.claudeToday')) + ' <b>' +
+      escHtml(String(data.claude_calls_today || 0)) + '</b></span>');
 }
 
 async function loadCompanies() {
@@ -2119,11 +2521,13 @@ async function loadCompanies() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _companies = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9906;', 'No companies yet',
-      'OpenVZ Leads\' Scout agent hasn\'t researched any companies. Finish <b>Setup</b>, then start OpenVZ Leads from the <b>Controls</b> tab.');
+    el.innerHTML = emptyState('&#9906;', t('companies.empty'), t('companies.emptyCopy'));
     return;
   }
-  let html = '<div class="table-card"><table><thead><tr><th>Company</th><th>Domain</th><th>Industry</th><th>Size</th><th>Location</th><th>Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
+  const companyCols = ['name', 'domain', 'industry', 'size', 'location', 'contacts', 'source', 'added'];
+  let html = '<div class="table-card"><table><thead><tr>' +
+    companyCols.map(c => '<th>' + escHtml(t('companies.col.' + c)) + '</th>').join('') +
+    '</tr></thead><tbody>';
   data.forEach((c, i) => {
     const website = c.website || (c.domain ? 'https://' + c.domain : '');
     const nameLink = website
@@ -2144,19 +2548,24 @@ async function showCompanyContacts(index) {
   companyDrill = true;
   const el = document.getElementById('companies-list');
   const data = await api('/api/companies/' + encodeURIComponent(company.id) + '/contacts');
-  let html = '<div class="card"><h2>' + escHtml(company.name) + ' — Contacts</h2>' +
-    '<button class="btn btn-secondary btn-sm" onclick="loadCompanies()" style="margin-bottom:16px">&larr; Back to Companies</button>';
+  let html = '<div class="card"><h2>' +
+    escHtml(tf('companies.contactsOf', {company: company.name})) + '</h2>' +
+    '<button class="btn btn-secondary btn-sm" onclick="loadCompanies()" style="margin-bottom:16px">' +
+    t('companies.back') + '</button>';
   if (!data || !data.length) {
-    html += '<p style="color:var(--text-3);font-size:13px">No contacts found at this company yet.</p></div>';
+    html += '<p style="color:var(--text-3);font-size:13px">' + escHtml(t('companies.noContacts')) + '</p></div>';
   } else {
-    html += '<div class="table-card"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Status</th><th>Source</th></tr></thead><tbody>';
+    const drillCols = ['name', 'title', 'email', 'phone', 'linkedin', 'status', 'source'];
+    html += '<div class="table-card"><table><thead><tr>' +
+      drillCols.map(c => '<th>' + escHtml(t('contacts.col.' + c)) + '</th>').join('') +
+      '</tr></thead><tbody>';
     for (const p of data) {
       const emailIcon = p.email_verified ? ' <span class="verified">&#10003;</span>' : '';
       const phoneIcon = p.phone_verified ? ' <span class="verified">&#10003;</span>' : '';
       html += '<tr><td>' + escHtml(p.first_name) + ' ' + escHtml(p.last_name) + '</td>' +
         '<td>' + escHtml(p.title) + '</td><td>' + escHtml(p.email) + emailIcon + '</td>' +
         '<td>' + escHtml(p.phone) + phoneIcon + '</td>' +
-        '<td>' + (p.linkedin_url ? '<a href="' + escHtml(p.linkedin_url) + '" target="_blank" rel="noopener">Profile</a>' : '') + '</td>' +
+        '<td>' + (p.linkedin_url ? '<a href="' + escHtml(p.linkedin_url) + '" target="_blank" rel="noopener">' + escHtml(t('contacts.profile')) + '</a>' : '') + '</td>' +
         '<td>' + badge(p.status) + '</td><td class="muted">' + escHtml(p.source) + '</td></tr>';
     }
     html += '</tbody></table></div></div>';
@@ -2165,24 +2574,24 @@ async function showCompanyContacts(index) {
 }
 
 async function submitFeedback(entityType, entityId, promptText) {
-  const comment = prompt(promptText || 'Add your feedback:');
+  const comment = prompt(promptText || t('feedback.prompt'));
   if (!comment) return;
   const data = await api('/api/feedback', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({entity_type: entityType, entity_id: entityId, comment: comment})
   });
-  if (data && data.success) showToast('Feedback saved. OpenVZ Leads will take it into account.', 'success');
-  else showToast((data && data.message) || 'Could not save feedback.', 'error');
+  if (data && data.success) showToast(t('feedback.saved'), 'success');
+  else showToast((data && data.message) || t('feedback.failed'), 'error');
 }
 
 function fbProspect(i) {
   const p = _prospects[i];
-  if (p) submitFeedback('contact', p.id, 'Feedback on this contact:');
+  if (p) submitFeedback('contact', p.id, t('feedback.contact'));
 }
 
 function fbCampaign(i) {
   const c = _campaigns[i];
-  if (c) submitFeedback('campaign', c.id, 'Leave feedback on this campaign:');
+  if (c) submitFeedback('campaign', c.id, t('feedback.campaign'));
 }
 
 async function loadProspects() {
@@ -2191,11 +2600,13 @@ async function loadProspects() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _prospects = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9673;', 'No contacts yet',
-      'OpenVZ Leads hasn\'t found any prospects. Once it\'s running, the Scout agent searches the web for people matching your ideal customer profile in <b>openvz-leads.yaml</b>.');
+    el.innerHTML = emptyState('&#9673;', t('contacts.empty'), t('contacts.emptyCopy'));
     return;
   }
-  let html = '<div class="table-card"><table><thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th><th>Source</th><th>Added</th><th></th></tr></thead><tbody>';
+  const contactCols = ['name', 'title', 'company', 'email', 'phone', 'status', 'source', 'added'];
+  let html = '<div class="table-card"><table><thead><tr>' +
+    contactCols.map(c => '<th>' + escHtml(t('contacts.col.' + c)) + '</th>').join('') +
+    '<th></th></tr></thead><tbody>';
   data.forEach((p, i) => {
     const emailV = p.email ? (escHtml(p.email) + (p.email_verified ? ' <span class="verified">&#10003;</span>' : '')) : '';
     const phoneV = p.phone ? (escHtml(p.phone) + (p.phone_verified ? ' <span class="verified">&#10003;</span>' : '')) : '';
@@ -2203,7 +2614,8 @@ async function loadProspects() {
       '<td>' + escHtml(p.title) + '</td><td>' + escHtml(p.company) + '</td>' +
       '<td>' + emailV + '</td><td>' + phoneV + '</td><td>' + badge(p.status) + '</td>' +
       '<td class="muted">' + escHtml(p.source) + '</td><td class="muted">' + formatDate(p.created_at) + '</td>' +
-      '<td><button class="btn btn-secondary btn-sm" onclick="fbProspect(' + i + ')">Feedback</button></td></tr>';
+      '<td><button class="btn btn-secondary btn-sm" onclick="fbProspect(' + i + ')">' +
+      escHtml(t('contacts.feedback')) + '</button></td></tr>';
   });
   el.innerHTML = html + '</tbody></table></div>';
 }
@@ -2214,25 +2626,29 @@ async function loadCampaigns() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _campaigns = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9993;', 'No campaigns yet',
-      'The Writer agent hasn\'t drafted any sequences. It kicks in automatically once OpenVZ Leads has scored prospects to write for.');
+    el.innerHTML = emptyState('&#9993;', t('campaigns.empty'), t('campaigns.emptyCopy'));
     return;
   }
   let html = '';
   data.forEach((c, i) => {
     let stepsHtml = '';
     for (const step of (c.sequence || [])) {
-      stepsHtml += '<div class="email-step"><div class="step-num">Email ' + escHtml(String(step.step || '?')) +
-        (step.delay_days ? ' &middot; send after ' + escHtml(String(step.delay_days)) + ' days' : '') + '</div>' +
+      stepsHtml += '<div class="email-step"><div class="step-num">' +
+        escHtml(tf('campaigns.emailN', {step: step.step || '?'})) +
+        (step.delay_days
+          ? ' &middot; ' + escHtml(tf('campaigns.sendAfter', {days: step.delay_days}))
+          : '') + '</div>' +
         '<div class="subject">' + escHtml(step.subject) + '</div>' +
         '<div class="body">' + escHtml(step.body) + '</div></div>';
     }
     const pc = (c.prospect_ids || []).length;
-    html += '<div class="campaign-card"><h3>' + escHtml(c.name || 'Untitled Campaign') + '</h3>' +
+    html += '<div class="campaign-card"><h3>' + escHtml(c.name || t('campaigns.untitled')) + '</h3>' +
       '<div class="meta">' + badge(c.status) + '<span>' + escHtml(c.channel || 'email') + '</span>' +
-      '<span>' + pc + ' prospect' + (pc !== 1 ? 's' : '') + '</span><span>' + formatDate(c.created_at) + '</span>' +
-      '<button class="btn btn-secondary btn-sm" onclick="fbCampaign(' + i + ')">Feedback</button></div>' +
-      (stepsHtml || '<p style="color:var(--text-3);font-size:13px">No email steps in this campaign.</p>') + '</div>';
+      '<span>' + escHtml(tf('campaigns.prospects', {count: pc})) + '</span>' +
+      '<span>' + formatDate(c.created_at) + '</span>' +
+      '<button class="btn btn-secondary btn-sm" onclick="fbCampaign(' + i + ')">' +
+      escHtml(t('contacts.feedback')) + '</button></div>' +
+      (stepsHtml || '<p style="color:var(--text-3);font-size:13px">' + escHtml(t('campaigns.noSteps')) + '</p>') + '</div>';
   });
   el.innerHTML = html;
 }
@@ -2242,8 +2658,7 @@ async function loadConversations() {
   const data = await api('/api/conversations');
   if (!data) { el.innerHTML = offlineState(); return; }
   if (!data.length) {
-    el.innerHTML = emptyState('&#9737;', 'No conversations yet',
-      'No prospects have replied so far. When they do, the Handler agent classifies each reply and responds — every thread shows up here.');
+    el.innerHTML = emptyState('&#9737;', t('conversations.empty'), t('conversations.emptyCopy'));
     return;
   }
   let html = '';
@@ -2254,12 +2669,12 @@ async function loadConversations() {
       threadHtml += '<div class="thread-msg ' + cls + '"><div class="sender">' + escHtml(msg.sender) +
         ' &middot; ' + formatDate(msg.timestamp) + '</div>' + escHtml(msg.content) + '</div>';
     }
-    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unknown';
+    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || t('conversations.unknown');
     html += '<div class="convo-card"><h3>' + escHtml(name) +
       (c.company ? ' <span style="color:var(--text-3);font-weight:500">&mdash; ' + escHtml(c.company) + '</span>' : '') + '</h3>' +
       '<div class="meta">' + badge(c.status) + (c.intent ? badge(c.intent) : '') +
       '<span>' + escHtml(c.prospect_email || '') + '</span><span>' + formatDate(c.updated_at) + '</span></div>' +
-      (threadHtml || '<p style="color:var(--text-3);font-size:13px">No messages in this thread yet.</p>') + '</div>';
+      (threadHtml || '<p style="color:var(--text-3);font-size:13px">' + escHtml(t('conversations.noMessages')) + '</p>') + '</div>';
   }
   el.innerHTML = html;
 }
@@ -2269,8 +2684,7 @@ async function loadActivity() {
   const data = await api('/api/activity');
   if (!data) { el.innerHTML = offlineState(); return; }
   if (!data.length) {
-    el.innerHTML = emptyState('&#9202;', 'No activity yet',
-      'OpenVZ Leads hasn\'t taken any actions. Every prospect found, email written, and reply handled will appear here the moment it happens.');
+    el.innerHTML = emptyState('&#9202;', t('activity.empty'), t('activity.emptyCopy'));
     return;
   }
   let html = '<div class="activity-feed">';
