@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openvz_leads"
-version = "1.2.0"
+version = "1.2.1"
 description = "Autonomous AI sales agent. Find them. Understand them. Reach them."
 readme = "README.md"
 requires-python = ">=3.11"
