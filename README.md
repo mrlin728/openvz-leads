@@ -120,7 +120,11 @@ openvz-leads run          # 心跳循环：找 → 分析 → 写 → 排队等�
 openvz-leads dashboard    # 浏览器打开 http://localhost:5555
 openvz-leads stage        # 看每个人现在在哪一步
 openvz-leads gmail login  # 只有要用自己邮箱发信时才需要
+openvz-leads gmail preview   # 打印下一封会发出去的信，不发
+openvz-leads gmail test 你@自己的邮箱   # 把它真发给你自己看一眼
 ```
+
+**第一次真发之前先跑 `gmail preview`。**它渲染的是队列里下一封真实的信，走的是发送时同一套函数 —— 所以它能证明四件否则只能拿陌生人来试的事：变量替换对了、页脚在且内容正确、账号授权好了、以及这封信看起来不像是机器漏了一格拼出来的。`gmail test` 再把同一封发给你自己，**只发给你在命令行里写的那个地址**。
 
 ---
 

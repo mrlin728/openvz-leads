@@ -123,7 +123,11 @@ openvz-leads run          # heartbeat: find → analyse → draft → queue for 
 openvz-leads dashboard    # http://localhost:5555
 openvz-leads stage        # where everyone is in the pipeline
 openvz-leads gmail login  # only if sending from your own mailbox
+openvz-leads gmail preview        # print the next message, send nothing
+openvz-leads gmail test you@…     # post that same message to yourself
 ```
+
+**Run `gmail preview` before the first real send.** It renders the next message actually sitting in the queue, through the same functions the Sender uses, so it proves the four things otherwise only provable by emailing a stranger: the merge variables resolved, the footer is present and correct, the account is authorised, and the mail looks the way you meant it to. `gmail test` posts that same message to yourself — and only to the address you name.
 
 ---
 

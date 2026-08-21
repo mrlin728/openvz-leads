@@ -119,6 +119,7 @@ CLOUDFLARE_API_TOKEN=
 LINKEDIN_EMAIL=          # ToS risk — mention it, don't recommend it
 LINKEDIN_PASSWORD=
 OPENVZ_LEADS_DB=         # run multiple workspaces from one install
+OPENVZ_LEADS_HOME=       # ditto, and the config/prompts/skills follow it too
 OPENAI_API_KEY=          # only if model.provider is openai
 DEEPSEEK_API_KEY=        # only if model.provider is deepseek
 MODEL_API_KEY=           # one override for whichever remote provider is set
@@ -144,6 +145,7 @@ openvz-leads dashboard    # http://localhost:5555
 - **"It's finding the wrong people"** → `icp` in `openvz-leads.yaml`
 - **"It's using too much Claude"** → raise `profiling.min_score`, lower `profiling.max_per_cycle`, or lower `usage.max_daily_claude_percent`
 - **"Show me the database"** → `data/leads.db`, plain SQLite
+- **"Show me what it's about to send"** → `openvz-leads gmail preview`, or the send queue under Campaigns in the dashboard
 
 ---
 
@@ -185,6 +187,8 @@ Campaigns awaiting review are **not** an action — they block on a person, not 
 - **Four jobs the platform used to do**, all now in `agents/sender.py` and `outreach.py`: scheduling (the `outbox` table), merge-variable substitution, the opt-out footer, and stopping on a reply.
 - **`read_scope`**: `metadata` (default) sees *that* they replied; `readonly` sees what they said, which the Handler needs to classify intent. `none` plus `max_followups > 0` is rejected at startup — follow-ups that cannot be stopped are the worst thing this could ship.
 - **Threading**: follow-ups carry `In-Reply-To` and Gmail's `threadId`, so they land in the same conversation. `Re:` on a real thread is honest; the ban is on faking a history.
+- **Before their first real send**, walk them through `openvz-leads gmail preview` and then `gmail test <their own address>`. It renders a genuinely queued message through the Sender's own code, so it proves the footer, the substitution and the authorisation without practising on a prospect. Recommend `max_daily_sends: 5` for the first day.
+- **A follow-up requires the first email to have been sent.** If step one failed, the rest of the sequence is cancelled — step two's copy refers to a message the prospect never got, and only step one records contact, so sending it would leave them emailed but stuck at 'queued'.
 - **After an outage** every overdue step is due at once. `_flush_outbox` sends at most one message per prospect per pass, and `rebase_outbox_after_send` measures the next gap from the actual send. Do not "optimise" either away.
 
 ### Key commands
@@ -199,7 +203,7 @@ openvz-leads train <url>
 openvz-leads target "dental clinics in California"
 openvz-leads stage                                # the funnel
 openvz-leads stage <id> meeting --note "Thu 3pm"
-openvz-leads gmail login | status | logout
+openvz-leads gmail login | status | preview | test <addr> | logout
 openvz-leads setup
 ```
 

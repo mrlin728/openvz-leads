@@ -297,6 +297,10 @@ def cmd_gmail(args):
         print()
         return
 
+    if args.gmail_command in ("preview", "test"):
+        _gmail_preview(args, env, read_scope, footer_problem)
+        return
+
     if args.gmail_command == "logout":
         path = gmail_api.token_path()
         if path.exists():
@@ -322,6 +326,149 @@ def cmd_gmail(args):
         print("  One thing left before anything can be sent:")
         print(f"  {footer_problem}")
     print()
+
+
+def _gmail_preview(args, env, read_scope: str, footer_problem: str):
+    """Show — or send to yourself — exactly what a prospect would receive.
+
+    The point is that this is not a mock-up. It renders the next message
+    actually sitting in the queue, through the same functions the Sender
+    uses, so it proves the four things that are otherwise only provable by
+    emailing a stranger: the merge variables resolved, the footer is there
+    and correct, the account is authorised, and the mail arrives looking the
+    way you meant it to.
+    """
+    from openvz_leads.config import ConfigError, load_config
+    from openvz_leads.integrations import gmail as gmail_api
+    from openvz_leads.outreach import render_email
+    from openvz_leads.state import StateManager
+
+    try:
+        config = load_config()
+    except (ConfigError, Exception) as e:
+        print(f"\n  Cannot read the configuration: {e}\n")
+        sys.exit(1)
+
+    settings = config.channels.email.gmail
+    footer = settings.footer.render()
+
+    async def _go():
+        state = StateManager()
+        await state.init_db()
+
+        queued = await state.get_due_outbox(limit=1)
+        if not queued:
+            queued = await _any_pending(state)
+
+        if queued:
+            row = queued[0]
+            prospect = await state.get_prospect(row["prospect_id"])
+            source = f"queued message, step {row['step']}"
+        else:
+            # Nothing queued yet — which is the normal state before the first
+            # campaign. Show the footer and the sender on a stand-in rather
+            # than printing nothing useful.
+            from openvz_leads.models.prospect import Prospect
+
+            row = {
+                "subject": "{{first_name}}, quick question about {{company}}",
+                "body": (
+                    "Hi {{first_name}},\n\nThis is a sample — nothing is "
+                    "queued yet. Everything below the line is real: it is the "
+                    "footer that will go out on every message."
+                ),
+                "step": 1,
+            }
+            prospect = Prospect(
+                first_name="Alex", last_name="Sample",
+                title="Owner", company="Sample Co", email="",
+            )
+            source = "sample (nothing is queued yet)"
+
+        if prospect is None:
+            print("\n  That queued message has no prospect on record.\n")
+            sys.exit(1)
+
+        subject, body, blockers = render_email(
+            row["subject"], row["body"], prospect, footer=footer
+        )
+
+        print()
+        print(f"  Source:  {source}")
+        print(f"  To:      {prospect.email or '(no address)'}")
+        print(f"  From:    {settings.sender_name or config.persona.name}")
+        print()
+        print("  " + "─" * 62)
+        print(f"  Subject: {subject}")
+        print("  " + "─" * 62)
+        for line in body.splitlines():
+            print(f"  {line}")
+        print("  " + "─" * 62)
+        print()
+
+        if blockers:
+            print("  This message would NOT be sent:")
+            for blocker in blockers:
+                print(f"    · {blocker}")
+            print()
+        if footer_problem:
+            print(f"  Nothing can be sent yet: {footer_problem}")
+            print()
+
+        if args.gmail_command == "preview":
+            print("  Nothing was sent. To post this to yourself:")
+            print("    openvz-leads gmail test you@example.com")
+            print()
+            return
+
+        # `test` — actually send, but only ever to the address given on the
+        # command line. A test that could reach a prospect is not a test.
+        target = (args.address or "").strip()
+        if not target:
+            print("  Give the address to send it to:")
+            print("    openvz-leads gmail test you@example.com\n")
+            sys.exit(2)
+
+        creds = gmail_api.load_credentials(env)
+        client = gmail_api.GmailClient(creds, read_scope)
+        ready, why = client.readiness()
+        if not ready:
+            print(f"  {why}\n")
+            sys.exit(1)
+
+        try:
+            result = await client.send(
+                to=target,
+                subject=f"[test] {subject}",
+                body=body,
+                sender_name=settings.sender_name or config.persona.name,
+            )
+        except gmail_api.GmailError as e:
+            print(f"  Could not send: {e}\n")
+            sys.exit(1)
+
+        print(f"  Sent to {target}.")
+        print(f"  Gmail message {result.message_id}, thread {result.thread_id}.")
+        print()
+        print("  Check it in your inbox: the footer, the greeting, and that")
+        print("  nothing reads like it came out of a machine with a hole in it.")
+        print()
+
+    asyncio.run(_go())
+
+
+async def _any_pending(state):
+    """The soonest queued message, due or not — for previewing."""
+    import aiosqlite
+
+    async with aiosqlite.connect(state.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM outbox WHERE status = 'pending'
+               ORDER BY send_after ASC LIMIT 1"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            return [dict(row)] if row else []
 
 
 def cmd_export(args):
@@ -545,8 +692,25 @@ def main():
         help="Print the URL instead of opening it (for a remote shell)",
     )
     gmail_subs.add_parser("status", help="Show which account is authorised")
+    gmail_subs.add_parser(
+        "preview",
+        help="Print the next queued message exactly as it would be sent",
+    )
+    test = gmail_subs.add_parser(
+        "test",
+        help="Send that message to an address of your own, to see it for real",
+        description=(
+            "Renders the next queued message through the same code the "
+            "Sender uses and posts it to the address you name — and only "
+            "that address. The way to check the footer, the greeting and "
+            "the threading without practising on a prospect."
+        ),
+    )
+    test.add_argument("address", help="Your own address, e.g. you@example.com")
     gmail_subs.add_parser("logout", help="Delete the stored token")
-    sub.set_defaults(func=cmd_gmail, gmail_command="status", no_browser=False)
+    sub.set_defaults(
+        func=cmd_gmail, gmail_command="status", no_browser=False, address=""
+    )
 
     # openvz-leads export <dataset> --format <fmt>
     sub = subparsers.add_parser(

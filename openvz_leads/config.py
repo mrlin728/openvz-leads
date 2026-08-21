@@ -643,7 +643,23 @@ def load_env() -> EnvConfig:
 
 
 def _find_config_file() -> str:
-    """Search for openvz-leads.yaml in common locations."""
+    """Find openvz-leads.yaml.
+
+    An explicit workspace wins outright. OPENVZ_LEADS_HOME is how one install
+    drives several workspaces — different products, different ICPs — and the
+    database, prompts and skills all follow it. If the config did not, then
+    running from inside a checkout would pair one workspace's prospects with
+    another's configuration: the wrong persona, the wrong ICP, and on the
+    Gmail path the wrong sender and postal address on real mail. Silently,
+    because both files exist and both parse.
+
+    Without an override the old order stands, which is what a checkout wants.
+    """
+    if os.getenv("OPENVZ_LEADS_HOME", "").strip():
+        workspace_config = _paths.config_file()
+        if workspace_config.exists():
+            return str(workspace_config)
+
     candidates = [
         Path.cwd() / "openvz-leads.yaml",
         Path.cwd().parent / "openvz-leads.yaml",

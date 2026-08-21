@@ -172,3 +172,67 @@ def test_load_env_reads_environment(monkeypatch):
 def test_env_config_rejects_non_string():
     with pytest.raises(ValidationError):
         EnvConfig(instantly_api_key=["not", "a", "string"])
+
+
+# ── Which workspace's configuration is this? ──
+
+
+class TestConfigDiscovery:
+    """OPENVZ_LEADS_HOME is how one install drives several workspaces.
+
+    The database, prompts and skills all follow it. Until this was fixed the
+    config did not, so running from inside a checkout paired one workspace's
+    prospects with another's configuration — the wrong persona and ICP, and
+    on the Gmail path the wrong sender name and postal address on real mail.
+    Silently, because both files exist and both parse.
+    """
+
+    def _write(self, path, company):
+        import yaml
+
+        data = {k: v for k, v in MINIMAL.items()}
+        data["persona"] = {**MINIMAL["persona"], "company": company}
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    def test_an_explicit_workspace_wins_over_the_working_directory(
+        self, tmp_path, monkeypatch
+    ):
+        from openvz_leads.config import _find_config_file
+
+        cwd = tmp_path / "checkout"
+        workspace = tmp_path / "workspace"
+        cwd.mkdir()
+        workspace.mkdir()
+        self._write(cwd / "openvz-leads.yaml", "Checkout Co")
+        self._write(workspace / "openvz-leads.yaml", "Workspace Co")
+
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("OPENVZ_LEADS_HOME", str(workspace))
+        assert _find_config_file() == str(workspace / "openvz-leads.yaml")
+
+    def test_without_an_override_the_working_directory_still_wins(
+        self, tmp_path, monkeypatch
+    ):
+        """A plain checkout keeps behaving exactly as it did."""
+        from openvz_leads.config import _find_config_file
+
+        cwd = tmp_path / "checkout"
+        cwd.mkdir()
+        self._write(cwd / "openvz-leads.yaml", "Checkout Co")
+
+        monkeypatch.chdir(cwd)
+        monkeypatch.delenv("OPENVZ_LEADS_HOME", raising=False)
+        assert _find_config_file() == str(cwd / "openvz-leads.yaml")
+
+    def test_an_override_pointing_nowhere_falls_back_rather_than_failing(
+        self, tmp_path, monkeypatch
+    ):
+        from openvz_leads.config import _find_config_file
+
+        cwd = tmp_path / "checkout"
+        cwd.mkdir()
+        self._write(cwd / "openvz-leads.yaml", "Checkout Co")
+
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("OPENVZ_LEADS_HOME", str(tmp_path / "does-not-exist"))
+        assert _find_config_file() == str(cwd / "openvz-leads.yaml")
