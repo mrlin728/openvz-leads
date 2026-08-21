@@ -202,5 +202,23 @@ openvz-leads setup
 - **crawl4ai / browser-use "not installed"** — they are optional extras, excluded from the desktop builds on purpose. `pip install "openvz-leads[crawl]"`. The basic tier still reads the page
 - **Stage changes not reaching the CRM** — they are not lost. Check `stage_events` where `synced = 0`; the heartbeat retries every cycle. `synced = 2` means the receiver returned a 4xx, and `sync_error` says what it was
 
+### Releasing
+Both artefacts are built on the OS they run on — PyInstaller freezes the
+interpreter it is running under, so there is no cross-compiling.
+
+```bash
+./packaging/build-macos.sh 1.1.0          # tests → freeze → smoke test → dmg
+gh workflow run windows-build.yml -f release_tag=v1.1.0
+```
+
+The Mac script prints the three constants the website needs afterwards
+(`LEADS_TAG`, `LEADS_VERSION`, `LEADS_SIZE` in `lib/leads.ts` of the site
+repo). Change only one side and the download page quietly serves a stale
+version or prints a size that does not match the file.
+
+Neither artefact is signed — we have no certificate — so macOS needs
+right-click → Open on first launch and Windows shows SmartScreen once. The
+DMG ships a note saying so; keep it.
+
 ### Provenance
 MIT derivative of [Harvey](https://github.com/ethanplusai/harvey) by Ethan Rogers. See `NOTICE.md` for the change list. Keep the upstream copyright in `LICENSE`.
