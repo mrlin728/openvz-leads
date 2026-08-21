@@ -230,9 +230,9 @@ class TestWriteBack:
 
     def test_apply_writes_the_file(self, tmp_path):
         path = tmp_path / "openvz-leads.yaml"
-        path.write_text(CONFIG)
+        path.write_text(CONFIG, encoding="utf-8")
         apply_to_file(ICPDraft(industries=["dental clinic"]), path)
-        assert yaml.safe_load(path.read_text())["icp"]["industries"] == ["dental clinic"]
+        assert yaml.safe_load(path.read_text(encoding="utf-8"))["icp"]["industries"] == ["dental clinic"]
 
     def test_the_config_the_product_ships_round_trips(self):
         """The template is the file most users edit — it must survive a save."""
@@ -241,7 +241,7 @@ class TestWriteBack:
         template = Path(__file__).resolve().parent.parent / "openvz-leads.yaml"
         if not template.exists():
             pytest.skip("running outside a checkout")
-        original = template.read_text()
+        original = template.read_text(encoding="utf-8")
         draft = ICPDraft(industries=["dental clinic"], request="find dental clinics")
         out = replace_icp_block(original, render_icp_block(draft))
         before, after = yaml.safe_load(original), yaml.safe_load(out)

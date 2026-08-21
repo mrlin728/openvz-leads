@@ -32,7 +32,7 @@ MINIMAL = {
 
 def test_load_config_from_yaml_file(tmp_path):
     path = tmp_path / "openvz-leads.yaml"
-    path.write_text(yaml.safe_dump(MINIMAL))
+    path.write_text(yaml.safe_dump(MINIMAL), encoding="utf-8")
     config = load_config(str(path))
     assert config.persona.name == "H"
     assert config.icp.titles == ["CEO"]
@@ -45,7 +45,7 @@ def test_load_config_missing_file_raises(tmp_path):
 
 def test_load_config_malformed_yaml_raises(tmp_path):
     path = tmp_path / "openvz-leads.yaml"
-    path.write_text("persona: [unclosed\n  - :bad")
+    path.write_text("persona: [unclosed\n  - :bad", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(str(path))
 
@@ -54,21 +54,21 @@ def test_load_config_yaml_missing_sections_raises(tmp_path):
     # Invalid config must be rejected; the exact exception type has churned
     # between ConfigError and pydantic ValidationError, both are acceptable.
     path = tmp_path / "openvz-leads.yaml"
-    path.write_text(yaml.safe_dump({"persona": MINIMAL["persona"]}))
+    path.write_text(yaml.safe_dump({"persona": MINIMAL["persona"]}), encoding="utf-8")
     with pytest.raises((ConfigError, ValidationError)):
         load_config(str(path))
 
 
 def test_load_config_empty_file_raises(tmp_path):
     path = tmp_path / "openvz-leads.yaml"
-    path.write_text("")
+    path.write_text("", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(str(path))
 
 
 def test_load_config_non_mapping_yaml_raises(tmp_path):
     path = tmp_path / "openvz-leads.yaml"
-    path.write_text("- just\n- a\n- list\n")
+    path.write_text("- just\n- a\n- list\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(str(path))
 

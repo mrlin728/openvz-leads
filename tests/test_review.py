@@ -240,7 +240,7 @@ class TestPromptTemplating:
         monkeypatch.setenv("OPENVZ_LEADS_HOME", str(tmp_path))
         prompts = tmp_path / "prompts"
         prompts.mkdir()
-        (prompts / "typo.md").write_text("Sell {{prodcut_name}} to {{first_name}}.")
+        (prompts / "typo.md").write_text("Sell {{prodcut_name}} to {{first_name}}.", encoding="utf-8")
 
         brain = Brain(StateManager(str(tmp_path / "t.db")))
         with caplog.at_level("WARNING"):
@@ -277,14 +277,14 @@ class TestWorkspaceResolution:
         source = tmp_path / "bundle"
         (source / "prompts").mkdir(parents=True)
         (source / "skills").mkdir()
-        (source / "prompts" / "writer.md").write_text("shipped")
-        (source / "prompts" / "scout.md").write_text("shipped")
-        (source / "openvz-leads.yaml").write_text("shipped")
+        (source / "prompts" / "writer.md").write_text("shipped", encoding="utf-8")
+        (source / "prompts" / "scout.md").write_text("shipped", encoding="utf-8")
+        (source / "openvz-leads.yaml").write_text("shipped", encoding="utf-8")
 
         ws = tmp_path / "workspace"
         ws.mkdir()
         (ws / "prompts").mkdir()
-        (ws / "prompts" / "writer.md").write_text("MINE")
+        (ws / "prompts" / "writer.md").write_text("MINE", encoding="utf-8")
 
         monkeypatch.setenv("OPENVZ_LEADS_HOME", str(ws))
         monkeypatch.setattr(paths, "bundle_root", lambda: source)
@@ -292,7 +292,7 @@ class TestWorkspaceResolution:
         paths.ensure_workspace()
 
         # An edited prompt survives; a new one arrives.
-        assert (ws / "prompts" / "writer.md").read_text() == "MINE"
-        assert (ws / "prompts" / "scout.md").read_text() == "shipped"
-        assert (ws / "openvz-leads.yaml").read_text() == "shipped"
+        assert (ws / "prompts" / "writer.md").read_text(encoding="utf-8") == "MINE"
+        assert (ws / "prompts" / "scout.md").read_text(encoding="utf-8") == "shipped"
+        assert (ws / "openvz-leads.yaml").read_text(encoding="utf-8") == "shipped"
         assert (ws / "data").is_dir()

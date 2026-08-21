@@ -72,7 +72,7 @@ def _read_env_file() -> dict[str, str]:
     """Read .env file and return as dict."""
     env_vars = {}
     if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, _, value = line.partition("=")
@@ -85,7 +85,7 @@ def _write_env_file(updates: dict[str, str]):
     existing = _read_env_file()
     existing.update(updates)
     lines = [f"{k}={v}" for k, v in existing.items()]
-    ENV_FILE.write_text("\n".join(lines) + "\n")
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
     load_dotenv(str(ENV_FILE), override=True)
 
 
@@ -96,7 +96,7 @@ def _check_agent_pid() -> int | None:
         return _agent_process.pid
     if PID_FILE.exists():
         try:
-            pid = int(PID_FILE.read_text().strip())
+            pid = int(PID_FILE.read_text(encoding="utf-8").strip())
             os.kill(pid, 0)  # Check if process exists
             return pid
         except (ValueError, ProcessLookupError, PermissionError):
@@ -148,7 +148,7 @@ async def get_setup_status():
     config_valid = False
     if CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE) as f:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
             company = (cfg.get("persona") or {}).get("company", "")
             product = (cfg.get("product") or {}).get("name", "")
@@ -462,7 +462,10 @@ async def start_agent():
     (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
 
     try:
-        log_handle = open(LOG_FILE, "a")
+        # Popen writes to the file descriptor, so this wrapper's encoding
+        # is never used for the child's output — it is spelled out anyway
+        # so nobody has to work that out again.
+        log_handle = open(LOG_FILE, "a", encoding="utf-8")
         try:
             _agent_process = subprocess.Popen(
                 [sys.executable, "-m", "openvz_leads"],
@@ -481,7 +484,7 @@ async def start_agent():
 
     # Write PID file
     try:
-        PID_FILE.write_text(str(_agent_process.pid))
+        PID_FILE.write_text(str(_agent_process.pid), encoding="utf-8")
     except OSError as e:
         logger.warning("Could not write PID file: %s", e)
 

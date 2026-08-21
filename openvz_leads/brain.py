@@ -471,7 +471,7 @@ class Brain:
         """Load a prompt template from the prompts/ directory and fill in variables."""
         prompt_file = paths.prompts_dir() / f"{prompt_name}.md"
         try:
-            template = prompt_file.read_text()
+            template = prompt_file.read_text(encoding="utf-8")
         except FileNotFoundError:
             logger.warning(f"Prompt file not found: {prompt_file}")
             return ""
@@ -493,7 +493,7 @@ class Brain:
         """Load a skill knowledge file from the skills/ directory."""
         skill_file = paths.skills_dir() / f"{skill_name}.md"
         try:
-            return skill_file.read_text()
+            return skill_file.read_text(encoding="utf-8")
         except FileNotFoundError:
             logger.warning(f"Skill file not found: {skill_file}")
             return ""

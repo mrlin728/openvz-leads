@@ -626,7 +626,7 @@ def apply_to_file(draft: ICPDraft, config_path) -> str:
     from pathlib import Path
 
     path = Path(config_path)
-    original = path.read_text()
+    original = path.read_text(encoding="utf-8")
     updated = replace_icp_block(original, render_icp_block(draft))
 
     # Prove it still loads before replacing a working config with it.
@@ -639,5 +639,5 @@ def apply_to_file(draft: ICPDraft, config_path) -> str:
             "nothing was changed."
         )
 
-    path.write_text(updated)
+    path.write_text(updated, encoding="utf-8")
     return str(path)

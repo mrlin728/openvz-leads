@@ -451,7 +451,7 @@ def load_config(config_path: str | None = None) -> LeadsConfig:
         config_path = _find_config_file()
 
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except FileNotFoundError:
         raise ConfigFileNotFoundError(
