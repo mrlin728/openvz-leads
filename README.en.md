@@ -29,15 +29,34 @@ Writer: Campaign 'logistics-outreach' is waiting for your review.
 
 ---
 
-## Three jobs
+## It starts with a sentence
 
-| | What it does | Agent |
+```bash
+openvz-leads target "Find dental clinics in California with outdated websites and 5-50 employees"
+openvz-leads target "帮我找美国牙科诊所"
+```
+
+That becomes a structured ICP — **and a list of what it filled in that you never said.** You did not name job titles, so it inferred three. You did not give a size, so any size qualifies. You see that before anything is written. The dashboard's Target tab is the same thing with a text box.
+
+The qualifier is the part that matters. "With outdated websites" is not an industry, a size or a place, so a four-field parse drops it and hands back clinics that are perfectly happy with their website. It lands in `icp.keywords`, which does two things: loosens the search queries, and becomes a criterion **the account analysis must check against evidence** — confirmed, contradicted, or unknown.
+
+With no model available (no Claude CLI, or a configured provider with no key) a rule-based parser takes over. It is rougher, and it says so: `confidence: low`, `parsed by rules`. But the box still does something when you type in it.
+
+## One pipeline
+
+| | What happens | Who does it |
 |---|---|---|
-| **Find** | Searches the web for companies matching your ICP, crawls their sites, identifies decision-makers, infers and verifies email addresses. No Apollo or ZoomInfo needed | Scout |
+| **Say who** | A sentence → an ICP (industry / size / geography / titles / qualifiers), plus what was inferred | `openvz-leads target` |
+| **Find** | Searches for companies matching the ICP, reads their sites, identifies decision-makers, infers and verifies emails. No Apollo, no ZoomInfo | Scout |
 | **Understand** | One brief per account: what they do, why they fit (score + reasons), buying signals, likely pains, decision chain, opening angles — and **what not to say** | Profiler |
-| **Reach** | A 3-email sequence built on that brief, following proven cold-email frameworks under one hard rule: invent nothing | Writer |
+| **Write** | A 3-email sequence built on that brief, following proven frameworks under one hard rule: invent nothing | Writer |
+| **Wait for you** | The campaign enters a review queue. Nothing leaves before you approve it | You |
+| **Follow up** | With a channel configured, the sequence goes out; replies are classified, the stage advances, and a clear no stops everything | Sender / Handler |
+| **Move it along** | Contacted → replied → meeting → won / lost. Every move recorded, and pushed to a CRM if one is configured | `openvz-leads stage` |
 
 Then it stops. **Nothing is sent by default.**
+
+**Only a person can call a win.** Nothing in an inbox proves a deal closed — an enthusiastic reply is not a contract. A product that refuses to invent a buying signal has no business inventing a sale.
 
 ## Why sending is off by default
 
@@ -87,11 +106,22 @@ openvz-leads train https://your-company.com
 openvz-leads setup
 ```
 
+### Say who you're after
+
+```bash
+openvz-leads target "Find dental clinics in California with 5-50 staff"
+```
+
+It prints the parse and everything it inferred, and only writes to
+`openvz-leads.yaml` once you say yes — replacing the `icp:` block alone and
+leaving the rest of the file, comments included, exactly as it was.
+
 ### Run
 
 ```bash
 openvz-leads run          # heartbeat: find → analyse → draft → queue for review
 openvz-leads dashboard    # http://localhost:5555
+openvz-leads stage        # where everyone is in the pipeline
 ```
 
 ---
@@ -206,12 +236,14 @@ everything done           → run analytics
 ```
 openvz_leads/
 ├── main.py          heartbeat: quiet hours → budget → decide → act → log → sleep
-├── brain.py         headless claude -p wrapper + skills injection
+├── brain.py         the one place a model is called (CLI / OpenAI / DeepSeek)
 ├── state.py         SQLite (WAL) with linear schema migrations
 ├── exporter.py      CSV / Markdown / JSON export
 ├── dashboard.py     local FastAPI dashboard (bilingual)
 ├── config.py        config loading + validation
 ├── trainer.py       learn the product from a website
+├── icp.py           a sentence → an ICP, and what it inferred  ← new in this fork
+├── pipeline.py      stage machine + stage history              ← new in this fork
 │
 ├── agents/
 │   ├── scout.py     prospecting (DuckDuckGo → Bing → Google → Serper)
@@ -220,6 +252,11 @@ openvz_leads/
 │   ├── sender.py    delivery (optional; approved campaigns only)
 │   ├── handler.py   reply classification and response
 │   └── analyst.py   pipeline analytics
+│
+├── integrations/
+│   ├── crawler.py   tiered page reading: crawl4ai / basic / browser_use  ← new
+│   ├── crm.py       stage changes, pushed to a CRM                       ← new
+│   └── email_finder.py · instantly.py · linkedin.py · calendar.py
 │
 └── models/
     └── profile.py   the account-brief schema  ← new in this fork
@@ -243,6 +280,52 @@ The settings in `openvz-leads.yaml` worth knowing:
 | `profiling.max_per_cycle` | `5` | Analyses per heartbeat |
 | `usage.max_daily_claude_percent` | `80` | Share of the daily quota it may use |
 | `usage.quiet_hours` | 22:00–07:00 | When it stays idle |
+| `model.provider` | `claude_cli` | What does the thinking. See below |
+| `crawl.provider` | `auto` | How pages get read. See below |
+| `crm.provider` | `none` | Where stage changes go. See below |
+
+### Choosing a model
+
+The default is the Claude Code CLI on your machine: no API key, no second bill, and the reason "no extra model cost" is a true sentence. The other providers exist for the cases that default cannot serve — a server with no interactive login, a team already buying OpenAI credit, somewhere the Claude CLI is not available.
+
+```yaml
+model:
+  provider: "claude_cli"   # claude_cli | openai | deepseek | openai_compatible
+  name: ""                 # blank = the provider's default model
+  base_url: ""             # openai_compatible only
+```
+
+Keys live in `.env`: `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, or `MODEL_API_KEY` as a single override. `openai_compatible` covers anything speaking the same chat-completions API — vLLM, OpenRouter, a local Ollama. Every agent talks to the Brain and never to a provider, so this really is one line.
+
+### How pages get read
+
+Three tiers, cheapest first. `auto` uses the best one installed and only escalates when a page comes back blocked or empty.
+
+| Tier | What it does | Install |
+|---|---|---|
+| `basic` | httpx + BeautifulSoup. Always available | included |
+| `crawl4ai` | Renders JavaScript and returns **Markdown** — the model reads a document instead of de-tagged soup | `pip install "openvz-leads[crawl]"` |
+| `browser_use` | An agent driving a real browser. Gets past consent walls and into pages that do not exist as URLs. Slow, and **needs an API key of its own** (it drives an API model, not the Claude CLI) | `pip install "openvz-leads[browser]"` |
+
+Neither installed is a perfectly normal install — it is exactly what this did before the tiers existed. The desktop builds **deliberately exclude** both: each drags in a browser runtime, and multiplying the download for a tier most installs never reach is not a trade worth making.
+
+The browser tier stays off until you set `crawl.browser_fallback: true`.
+
+### Syncing to a CRM
+
+What happens after a relationship exists — recording it, following up, moving it along — belongs in whatever system already holds your customers. So every stage change is an event, and every event is offered to it:
+
+```yaml
+crm:
+  provider: "webhook"      # none | webhook | file
+  webhook_url: "https://your-crm.example.com/hooks/leads"
+```
+
+The payload shape is stable and additive; it is documented in full at the top of `openvz_leads/integrations/crm.py`. A bearer token goes in `.env` as `CRM_WEBHOOK_TOKEN`, not in the YAML. `provider: file` appends to `data/crm-sync.jsonl` for a later import.
+
+**A stage change is never lost to a sync failure.** The event is written locally and marked unsynced; a failed push leaves it that way and the next heartbeat retries. Only a 4xx — a receiver saying the request itself is wrong, which it will be next time too — marks the event permanently failed, so it stops blocking the queue behind it.
+
+Events go out **in order**. A failed push replayed later would leave a CRM record reading "won" before "contacted", and order is the only information a stage history carries.
 
 The database is `data/leads.db`, an ordinary SQLite file — open it with anything. To run several workspaces (different products, different ICPs), point `OPENVZ_LEADS_DB` at different paths.
 

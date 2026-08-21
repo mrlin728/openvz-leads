@@ -890,6 +890,7 @@ class Scout:
         industries = self.config.icp.industries or [""]
         geos = self.config.icp.geography or [""]
         size = self.config.icp.company_size or ""
+        keywords = getattr(self.config.icp, "keywords", []) or []
 
         for industry in industries[:2]:
             geo = geos[0] if geos else ""
@@ -907,6 +908,15 @@ class Scout:
             if geo and industry:
                 queries.append(f'top "{industry}" companies {geo}')
 
+            # A qualifier the user asked for ("outdated website") is usually
+            # unsearchable as written, but it still narrows the field when
+            # added loosely — and the Profiler checks it properly later.
+            # Unquoted on purpose: quoting turns a trait into a phrase match
+            # and returns nothing.
+            if industry and keywords:
+                trait = " ".join(keywords[:2])
+                queries.append(" ".join(p for p in (f'"{industry}"', geo, trait) if p))
+
         # Drop empties / dupes, cap to budget.
         seen = set()
         out = []
@@ -915,7 +925,7 @@ class Scout:
             if q and q != "company" and q not in seen:
                 seen.add(q)
                 out.append(q)
-        return out[:3]
+        return out[:4]
 
     async def _resolve_email(
         self, first_name: str, last_name: str, domain: str

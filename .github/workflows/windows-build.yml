@@ -83,6 +83,7 @@ jobs:
           # degraded but green. Assert the workspace really was seeded.
           $missing = @()
           foreach ($p in @("prompts\writer.md", "prompts\profiler.md",
+                           "prompts\icp.md",
                            "skills\email_frameworks.md", "openvz-leads.yaml")) {
             if (-not (Test-Path "$env:OPENVZ_LEADS_HOME\$p")) { $missing += $p }
           }
@@ -111,7 +112,11 @@ jobs:
             Write-Host "Fetched ChineseSimplified.isl"
           }
 
-          & $iscc /Qp "packaging\windows-installer.iss" /O"$PWD\dist-installer"
+          # The version comes from pyproject.toml, the one place it is written
+          # down. Inno cannot read a toml, so it gets passed in.
+          $version = python -c "import re,pathlib;print(re.search(r'^version\s*=\s*.([^\x22]+).', pathlib.Path('pyproject.toml').read_text(), re.M).group(1))"
+          Write-Host "Building the installer for version $version"
+          & $iscc /Qp "/DAppVersion=$version" "packaging\windows-installer.iss" /O"$PWD\dist-installer"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
           Get-ChildItem dist-installer
 

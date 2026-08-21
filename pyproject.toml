@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openvz_leads"
-version = "1.0.0"
+version = "1.1.0"
 description = "Autonomous AI sales agent. Find them. Understand them. Reach them."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,6 +38,22 @@ dependencies = [
 dev = [
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.23,<1",
+]
+# Better page reading. Both are genuinely optional: with neither installed
+# the crawler falls back to httpx + BeautifulSoup, which is what it did
+# before these existed. They are out of the base install because between them
+# they pull a browser and a few hundred MB, and most company sites are still
+# HTML that does not need either.
+crawl = [
+    # Renders JavaScript and returns Markdown, so the model reads a document
+    # rather than de-tagged soup.
+    "crawl4ai>=0.4,<1",
+]
+browser = [
+    # An agent driving a real browser, for consent walls and pages that only
+    # exist behind a click. Needs its own API key — it cannot drive the
+    # Claude Code CLI.
+    "browser-use>=0.1,<1",
 ]
 
 [project.urls]

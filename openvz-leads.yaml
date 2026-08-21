@@ -1,6 +1,11 @@
 # OpenVZ Leads configuration.
-# Run `openvz-leads setup` to fill this in interactively, or
-# `openvz-leads train https://your-site.com` to have it written from your site.
+#
+# Three ways to fill this in, easiest first:
+#   openvz-leads target "dental clinics in California, 5-50 staff"
+#                                    — writes the `icp:` block from a sentence
+#   openvz-leads train https://your-site.com
+#                                    — writes the `product:` block from your site
+#   openvz-leads setup               — asks you, one question at a time
 
 # Who the outreach comes from. Use a real person at a real company —
 # false identities are both illegal in most jurisdictions and the fastest
@@ -36,6 +41,11 @@ product:
 
 # Who you want to reach. The Scout searches against this, and the Profiler
 # scores every account against it.
+#
+# You do not have to write this by hand:
+#   openvz-leads target "find dental clinics in California with 5-50 staff"
+# parses a sentence into these fields, shows you what it inferred that you
+# never said, and writes the block back — comments and all.
 icp:
   industries:
     - "SaaS"
@@ -48,6 +58,19 @@ icp:
     - "Director of Marketing"
   geography:
     - "United States"
+  # Traits that are none of the four fields above — "outdated website",
+  # "recently funded", "hiring engineers". No search engine can filter on
+  # these, so they do two things instead: loosen the search queries, and
+  # become criteria the account analysis is told to check against evidence
+  # (confirmed / contradicted / unknown) rather than assume.
+  keywords: []
+  # What rules an account out. Checked during analysis: an account the
+  # evidence shows matching one of these is scored 1-3 with the reason.
+  exclusions: []
+  # The sentence the block above was parsed from, kept verbatim. Written by
+  # `openvz-leads target`; the only record of what was actually asked for
+  # once someone hand-edits the fields.
+  request: ""
 
 # ── Human review ──────────────────────────────────────────────────────
 # The safety rail. With require_approval on (the default), campaigns stop
@@ -80,6 +103,67 @@ channels:
     enabled: false       # automating LinkedIn violates their ToS — see README
     max_daily_connections: 20
     max_daily_messages: 10
+
+# ── The model ─────────────────────────────────────────────────────────
+# What does the thinking. The default is the Claude Code CLI already on your
+# machine: no API key, no second bill.
+#
+# The other providers are for the cases that cannot serve — a server with no
+# interactive login, a team that already buys OpenAI credit, a jurisdiction
+# where DeepSeek is the practical choice. Everything downstream talks to the
+# Brain, never to a provider, so this is genuinely a one-line change.
+#
+#   claude_cli         (default) headless `claude -p`. Needs `claude login`.
+#   openai             needs OPENAI_API_KEY in .env
+#   deepseek           needs DEEPSEEK_API_KEY in .env
+#   openai_compatible  anything speaking the same API — vLLM, OpenRouter,
+#                      Ollama. Set base_url and MODEL_API_KEY.
+model:
+  provider: "claude_cli"
+  name: ""                 # blank = the provider's default model
+  base_url: ""             # openai_compatible only
+  temperature: 0.3
+  max_tokens: 4096
+  daily_call_budget: 200   # calls/day at 100%; usage.max_daily_claude_percent scales it
+
+# ── Reading web pages ─────────────────────────────────────────────────
+# Three tiers, cheapest first. "auto" uses the best one installed and only
+# escalates when the page comes back blocked or empty.
+#
+#   basic        httpx + BeautifulSoup. Always available.
+#   crawl4ai     renders JavaScript, returns Markdown — the model reads a
+#                document instead of de-tagged soup.
+#                pip install "openvz-leads[crawl]"
+#   browser_use  an agent driving a real browser, for consent walls and
+#                pages that only exist behind a click. Slow, and needs an
+#                API key of its own (it cannot drive the Claude CLI).
+#                pip install "openvz-leads[browser]"
+crawl:
+  provider: "auto"
+  browser_fallback: false  # allow the browser tier when the others come back empty
+  max_chars: 6000
+  timeout_seconds: 30
+  delay_seconds: 1.0
+
+# ── CRM sync ──────────────────────────────────────────────────────────
+# OpenVZ Leads owns the pipeline up to the reply. Meeting, won and lost
+# belong wherever your customers already live, so each stage change can be
+# pushed there instead of being retyped.
+#
+#   none     record stage changes locally only (default)
+#   webhook  POST each change to webhook_url — works with OPENVZ CRM,
+#            Zapier, n8n, or anything that accepts JSON
+#   file     append JSON lines to data/crm-sync.jsonl for a later import
+#
+# The payload shape is documented in openvz_leads/integrations/crm.py and is
+# stable. A bearer token goes in .env as CRM_WEBHOOK_TOKEN, not here.
+crm:
+  provider: "none"
+  webhook_url: ""
+  # Trim this if you like, but keep opted_out: it is the one stage where
+  # the CRM not knowing eventually means someone emails them anyway.
+  sync_stages: ["contacted", "replied", "meeting", "won", "lost", "opted_out"]
+  timeout_seconds: 15
 
 usage:
   max_daily_claude_percent: 80

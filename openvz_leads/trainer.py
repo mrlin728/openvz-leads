@@ -311,10 +311,26 @@ class FallbackCrawler:
         return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
+def _existing_model_config():
+    """The configured model, when there already is a config.
+
+    Training usually runs *before* openvz-leads.yaml exists — that is the file
+    it writes — so a missing or broken config is the normal case and means
+    "use the Claude CLI". But re-training an install that switched providers
+    should not silently fall back to a CLI the user may not even have.
+    """
+    try:
+        from openvz_leads.config import load_config
+
+        return load_config().model
+    except Exception:
+        return None
+
+
 class Trainer:
     def __init__(self):
         self.state = StateManager()
-        self.brain = Brain(self.state)
+        self.brain = Brain(self.state, _existing_model_config())
         self.scraped_pages: dict[str, str] = {}
 
     async def train(

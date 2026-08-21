@@ -13,6 +13,8 @@ This product's whole shape is *human-in-the-loop*. Do not undo it:
 - **Nothing is sent without approval.** `review.require_approval` defaults to `true`. If someone asks to turn it off, tell them what they're giving up first.
 - **Sending is opt-in.** `channels.email.provider` defaults to `none`. The full pipeline — find, analyse, draft, export — works with no provider and no API keys at all. Never tell a user they "need Instantly to get started"; they don't.
 - **The analysis never fabricates.** `prompts/profiler.md` forbids inventing evidence and requires `confidence` and `evidence_gaps`. If you edit that prompt, keep those rules — a brief that sounds confident about invented facts is worse than no brief, because a rep will repeat it in a cold email.
+- **The ICP parser declares what it guessed.** `prompts/icp.md` requires an `assumptions` list and forbids inventing a geography. A parse that silently fills in a country sends the Scout somewhere nobody asked about, and the results never reveal it.
+- **Only a person can call a win.** `pipeline.HUMAN_ONLY` keeps `won` out of every agent's reach. Nothing in an inbox proves a deal closed, and a product that refuses to invent a buying signal must not invent a sale.
 
 ---
 
@@ -38,7 +40,9 @@ Check state silently, then guide from where they are:
 
 ## Explaining It
 
-- **"What does it do?"** → Three things, on a loop. Finds accounts matching your ICP by searching the web and crawling company sites. Analyses each one into a brief — what they do, why they fit, buying signals, who signs, how to open. Then drafts a 3-email sequence off that brief and puts it in a review queue for you.
+- **"What does it do?"** → You say who you want in a sentence — "find dental clinics in California with outdated websites" — and it turns that into an ICP, showing you what it inferred that you never said. Then, on a loop: finds accounts matching it, reads their sites, analyses each into a brief (what they do, why they fit, buying signals, who signs, how to open), drafts a 3-email sequence off that brief, and puts it in a review queue for you. After a reply it tracks the deal through meeting, won and lost, and pushes each move to a CRM if one is configured.
+
+- **"How do I tell it who to look for?"** → `openvz-leads target "..."`, or the Target tab in the dashboard. It shows the parse and its assumptions first; nothing is written until they say yes, and only the `icp:` block changes.
 
 - **"Does it send emails?"** → Only if you connect a sending provider *and* approve each campaign. Out of the box it drafts and you export — CSV for your CRM, Markdown to read, JSON for anything downstream.
 
@@ -49,6 +53,8 @@ Check state silently, then guide from where they are:
 - **"Is it safe?"** → It runs locally. Daily Claude usage caps, quiet hours, send limits, and human approval before anything leaves. Everything it does is in a local SQLite file you can inspect.
 
 - **"What does it cost?"** → Your Claude subscription. Serper (~$5 per 2,500 searches) is worth adding for reliable search. Everything else is optional.
+
+- **"Can it use GPT or DeepSeek instead?"** → Yes, `model.provider`. Say what they give up first: the default costs nothing extra because it runs on a subscription they already pay for. The other providers are for servers with no interactive login, or teams already buying that credit.
 
 ---
 
@@ -88,7 +94,17 @@ Generates `openvz-leads.yaml`, `skills/product_knowledge.md`, `skills/competitiv
 
 Also ask what language they want the account briefs in — `profiling.output_language`. It's independent of the email language.
 
-### 3. Keys (`.env`) — all optional
+### 3. Say who they're after
+
+```bash
+openvz-leads target "dental clinics in California with 5-50 staff"
+```
+
+This comes after the product step because it edits the `icp:` block of a config that has to already exist — `train` or `setup` makes one, `target` refines it.
+
+Read the assumptions back before saving. They are the point of the feature: "you did not name titles, so I inferred three" is the difference between a helpful default and a silent one.
+
+### 4. Keys (`.env`) — all optional
 
 ```
 SERPER_API_KEY=          # recommended — reliable search, ~$5/2500
@@ -99,9 +115,13 @@ CLOUDFLARE_API_TOKEN=
 LINKEDIN_EMAIL=          # ToS risk — mention it, don't recommend it
 LINKEDIN_PASSWORD=
 OPENVZ_LEADS_DB=         # run multiple workspaces from one install
+OPENAI_API_KEY=          # only if model.provider is openai
+DEEPSEEK_API_KEY=        # only if model.provider is deepseek
+MODEL_API_KEY=           # one override for whichever remote provider is set
+CRM_WEBHOOK_TOKEN=       # bearer token for crm.webhook_url
 ```
 
-### 4. Run
+### 5. Run
 
 ```bash
 openvz-leads run          # the loop
@@ -127,7 +147,11 @@ openvz-leads dashboard    # http://localhost:5555
 
 ### Architecture
 - **Heartbeat** (`main.py`): quiet hours → budget → decide → act → log → sleep
-- **Brain** (`brain.py`): wraps `claude -p --dangerously-skip-permissions`, with retries, timeout, and skills injection
+- **Brain** (`brain.py`): the one place a model is called. `claude_cli` (default) shells out to `claude -p --dangerously-skip-permissions`; `openai`/`deepseek`/`openai_compatible` go over HTTP. Retries, timeouts, skills injection. Agents talk to the Brain, never to a provider
+- **ICP** (`icp.py`): a sentence → an `ICPDraft`, plus the assumptions behind it. Writes back by replacing the `icp:` block textually, never by re-dumping the YAML — that would strip every comment in the file
+- **Crawler** (`integrations/crawler.py`): tiered page reading. crawl4ai → basic → browser_use, cheapest first, escalating only when a page comes back blocked or empty. The upper two are optional dependencies
+- **Pipeline** (`pipeline.py`): stage machine and history. Every status change goes through `advance()`, which records the move and offers it to the CRM
+- **CRM** (`integrations/crm.py`): stage changes as events, pushed to a webhook or a file. Documented payload, ordered delivery, retry on transient failure
 - **State** (`state.py`): SQLite (WAL) at `data/leads.db`. Schema changes go through the linear `MIGRATIONS` list tracked by `PRAGMA user_version` — **append, never edit a released migration**
 - **Skills** (`skills/`) and **prompts** (`prompts/`): markdown injected into agent prompts
 
@@ -138,6 +162,9 @@ openvz-leads dashboard    # http://localhost:5555
 - **Sender** — only ever touches `approved` campaigns; inert when `provider` is `none`
 - **Handler** — classifies reply intent, advances stage, dedupes replies
 - **Analyst** — no Claude calls; writes `data/analytics.json`
+
+### Pipeline stages
+`new → queued → contacted → replied → meeting → won | lost`, plus `opted_out`, which is reachable from anywhere and leaves from nowhere. `won`/`lost`/`opted_out` are terminal — reopening one would hide what happened the first time. Legacy status strings are mapped by `pipeline.normalize()`; anything unrecognised becomes `new`, which is the only safe wrong answer.
 
 ### Campaign lifecycle
 `draft → pending_review → approved | rejected → active | failed`
@@ -158,6 +185,9 @@ openvz-leads status
 openvz-leads review list
 openvz-leads export profiles --format markdown
 openvz-leads train <url>
+openvz-leads target "dental clinics in California"
+openvz-leads stage                                # the funnel
+openvz-leads stage <id> meeting --note "Thu 3pm"
 openvz-leads setup
 ```
 
@@ -167,6 +197,28 @@ openvz-leads setup
 - **Claude headless fails** — needs `claude login` and an active subscription
 - **Search rate-limited** — falls back to DuckDuckGo/Bing; add a Serper key for reliability
 - **Instantly 401** — wrong key, or API access needs their Growth plan
+- **"model.provider is 'openai' but OPENAI_API_KEY is not set"** — add the key, or set `model.provider` back to `claude_cli`. The Brain checks this before the heartbeat starts rather than failing a cycle an hour later
+- **`target` gives a rough parse and says "parsed by rules"** — no model was reachable. Check `claude login`, or the key for whichever provider is configured
+- **crawl4ai / browser-use "not installed"** — they are optional extras, excluded from the desktop builds on purpose. `pip install "openvz-leads[crawl]"`. The basic tier still reads the page
+- **Stage changes not reaching the CRM** — they are not lost. Check `stage_events` where `synced = 0`; the heartbeat retries every cycle. `synced = 2` means the receiver returned a 4xx, and `sync_error` says what it was
+
+### Releasing
+Both artefacts are built on the OS they run on — PyInstaller freezes the
+interpreter it is running under, so there is no cross-compiling.
+
+```bash
+./packaging/build-macos.sh 1.1.0          # tests → freeze → smoke test → dmg
+gh workflow run windows-build.yml -f release_tag=v1.1.0
+```
+
+The Mac script prints the three constants the website needs afterwards
+(`LEADS_TAG`, `LEADS_VERSION`, `LEADS_SIZE` in `lib/leads.ts` of the site
+repo). Change only one side and the download page quietly serves a stale
+version or prints a size that does not match the file.
+
+Neither artefact is signed — we have no certificate — so macOS needs
+right-click → Open on first launch and Windows shows SmartScreen once. The
+DMG ships a note saying so; keep it.
 
 ### Provenance
 MIT derivative of [Harvey](https://github.com/ethanplusai/harvey) by Ethan Rogers. See `NOTICE.md` for the change list. Keep the upstream copyright in `LICENSE`.

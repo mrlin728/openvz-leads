@@ -220,7 +220,54 @@ MIGRATIONS: list[str] = [
 
     CREATE INDEX IF NOT EXISTS idx_prospects_profiled_at ON prospects(profiled_at);
     """,
+    # ── v4: an explicit pipeline stage, with history ──
+    """
+    -- `status` has always held the stage; what was missing was when it last
+    -- moved, why, and what it moved from. Without that a CRM sync can only
+    -- push a snapshot, and "went to meeting then lost" is indistinguishable
+    -- from "was always lost".
+    ALTER TABLE prospects ADD COLUMN stage_changed_at TIMESTAMP;
+    ALTER TABLE prospects ADD COLUMN stage_reason TEXT DEFAULT '';
+
+    CREATE TABLE IF NOT EXISTS stage_events (
+        id TEXT PRIMARY KEY,
+        prospect_id TEXT REFERENCES prospects(id),
+        from_stage TEXT DEFAULT '',
+        to_stage TEXT DEFAULT '',
+        reason TEXT DEFAULT '',
+        -- who moved it: an agent name, or "human" from the dashboard/CLI.
+        actor TEXT DEFAULT '',
+        -- 0 = not yet pushed to the CRM, 1 = pushed, 2 = permanently failed.
+        -- Kept per event rather than per prospect so a sync outage replays
+        -- exactly the changes it missed instead of the current state.
+        synced INTEGER DEFAULT 0,
+        sync_error TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stage_events_prospect ON stage_events(prospect_id);
+    CREATE INDEX IF NOT EXISTS idx_stage_events_synced ON stage_events(synced);
+    CREATE INDEX IF NOT EXISTS idx_stage_events_created ON stage_events(created_at);
+
+    -- Existing rows have a stage but no timestamp for it; their last update
+    -- is the closest true answer and beats leaving it null.
+    UPDATE prospects SET stage_changed_at = updated_at WHERE stage_changed_at IS NULL;
+    """,
 ]
+
+# The prospect pipeline, in order. Mirrors openvz_leads/pipeline.py, which
+# owns the transition rules; this tuple exists so state queries can group and
+# order by stage without importing it.
+PIPELINE_STAGES = (
+    "new",        # found, not yet analysed or written to
+    "queued",     # outreach drafted, waiting on review or sending
+    "contacted",  # something actually went out
+    "replied",    # they answered
+    "meeting",    # booked
+    "won",
+    "lost",
+    "opted_out",  # asked not to be contacted — terminal, and never reversed
+)
 
 # Campaign lifecycle. Writer produces `pending_review` (or `approved` when
 # review is switched off); only `approved` is ever handed to a Sender.
@@ -435,6 +482,104 @@ class StateManager:
                 (status, _utcnow().isoformat(), prospect_id),
             )
             await db.commit()
+
+    # ── Pipeline stages ──
+
+    async def set_prospect_stage(
+        self,
+        prospect_id: str,
+        to_stage: str,
+        *,
+        from_stage: str = "",
+        reason: str = "",
+        actor: str = "agent",
+    ) -> str:
+        """Move a prospect and record the move. Returns the stage_event id.
+
+        The write and the event go in one transaction: an event without the
+        stage change would replay a move that never happened, and a stage
+        change without an event is invisible to the CRM sync forever.
+        """
+        event_id = _new_id()
+        now = _utcnow().isoformat()
+        async with self._connect() as db:
+            if not from_stage:
+                async with db.execute(
+                    "SELECT status FROM prospects WHERE id = ?", (prospect_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    from_stage = row[0] if row else ""
+            await db.execute(
+                """UPDATE prospects
+                   SET status = ?, stage_changed_at = ?, stage_reason = ?,
+                       updated_at = ?
+                   WHERE id = ?""",
+                (to_stage, now, reason, now, prospect_id),
+            )
+            await db.execute(
+                """INSERT INTO stage_events
+                   (id, prospect_id, from_stage, to_stage, reason, actor,
+                    synced, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
+                (event_id, prospect_id, from_stage, to_stage, reason, actor, now),
+            )
+            await db.commit()
+        return event_id
+
+    async def get_unsynced_stage_events(self, limit: int = 50) -> list[dict]:
+        """Stage changes the CRM has not been told about yet, oldest first.
+
+        Oldest first matters: a CRM receiving "won" before "meeting" ends up
+        with a record whose history reads backwards.
+        """
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM stage_events
+                   WHERE synced = 0
+                   ORDER BY created_at ASC
+                   LIMIT ?""",
+                (limit,),
+            ) as cursor:
+                return [dict(row) for row in await cursor.fetchall()]
+
+    async def mark_stage_event_synced(
+        self, event_id: str, *, ok: bool = True, error: str = ""
+    ):
+        """2, not 0, on permanent failure — a retry loop that never gives up
+        blocks every later event behind it."""
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE stage_events SET synced = ?, sync_error = ? WHERE id = ?",
+                (1 if ok else 2, error[:500], event_id),
+            )
+            await db.commit()
+
+    async def get_stage_history(self, prospect_id: str) -> list[dict]:
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM stage_events
+                   WHERE prospect_id = ?
+                   ORDER BY created_at ASC""",
+                (prospect_id,),
+            ) as cursor:
+                return [dict(row) for row in await cursor.fetchall()]
+
+    async def count_prospects_by_stage(self) -> dict:
+        """Every stage present as a key, zeroes included.
+
+        A funnel with holes in it is unreadable, and the dashboard should not
+        have to know the stage list to draw one.
+        """
+        counts = {stage: 0 for stage in PIPELINE_STAGES}
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT status, COUNT(*) FROM prospects GROUP BY status"
+            ) as cursor:
+                for status, total in await cursor.fetchall():
+                    counts[status or "new"] = counts.get(status or "new", 0) + total
+        return counts
 
     # ── Account profiling ──
 
@@ -876,6 +1021,7 @@ class StateManager:
 
         return {
             "prospects": prospect_counts,
+            "stages": await self.count_prospects_by_stage(),
             "draft_campaigns": draft_campaigns,
             "active_campaigns": active_campaigns,
             "pending_review": pending_review,

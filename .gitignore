@@ -13,6 +13,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Where build-macos.sh and the Windows workflow put the finished artefacts.
+dist-installer/
 .venv/
 venv/
 

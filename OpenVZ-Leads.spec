@@ -16,9 +16,21 @@ and bundling it plus a browser would multiply the download for a feature
 most people never turn on.
 """
 
+import re
 import sys
+from pathlib import Path
 
 IS_MAC = sys.platform == "darwin"
+
+# Read the version rather than repeating it. It used to appear here three
+# times and once in packaging/windows-installer.iss, hand-synced — which is
+# how you ship a dmg whose name and whose bundle disagree about what it is.
+# The .app value is the one macOS shows in Get Info.
+VERSION = re.search(
+    r'^version\s*=\s*"([^"]+)"',
+    Path("pyproject.toml").read_text(),
+    re.M,
+).group(1)
 
 datas = [
     ('prompts', 'prompts'),
@@ -44,7 +56,14 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=['playwright', 'tkinter', 'pytest', 'IPython', 'matplotlib', 'numpy'],
+    # crawl4ai and browser_use are opt-in extras and each drags in a browser
+    # runtime; bundling them would multiply the download for a tier most
+    # installs never reach. The crawler detects their absence and uses the
+    # basic tier, so the frozen app is fully functional without them.
+    excludes=[
+        'playwright', 'tkinter', 'pytest', 'IPython', 'matplotlib', 'numpy',
+        'crawl4ai', 'browser_use',
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -73,12 +92,12 @@ if IS_MAC:
         name='OpenVZ Leads.app',
         icon=None,
         bundle_identifier='com.openvzai.leads',
-        version='1.0.0',
+        version=VERSION,
         info_plist={
             'CFBundleName': 'OpenVZ Leads',
             'CFBundleDisplayName': 'OpenVZ Leads',
-            'CFBundleShortVersionString': '1.0.0',
-            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': VERSION,
+            'CFBundleVersion': VERSION,
             'NSHighResolutionCapable': True,
             'LSUIElement': False,
             'NSHumanReadableCopyright': 'MIT. Derived from Harvey by Ethan Rogers.',

@@ -29,15 +29,34 @@ Writer: Campaign 'logistics-outreach' is waiting for your review.
 
 ---
 
-## 三件事
+## 从一句话开始
+
+```bash
+openvz-leads target "帮我找美国牙科诊所"
+openvz-leads target "Find dental clinics in California with outdated websites and 5-50 employees"
+```
+
+它把这句话解析成结构化 ICP，**并且把替你填的部分单独列出来**——你没说职位，它推断了三个；你没说规模，那就是任何规模都算。看过之后再决定要不要存。仪表盘的「定位」页是同一件事的图形版本。
+
+「官网很旧」这类条件是这里的关键：它既不是行业也不是规模更不是地区，四个字段的解析会把它直接丢掉，然后返回一堆对自己官网很满意的诊所。它会进 `icp.keywords`，同时用来放宽搜索词、并作为**客户分析必须逐条核对的判据**（证实 / 证伪 / 无从判断）。
+
+没有模型可用时（没装 Claude CLI、或配的 provider 没 key），会退回一套规则解析器：更粗糙，会明说自己是规则解析、置信度标 low，但输入框不会变成死的。
+
+## 一条流水线
 
 | | 做什么 | 谁在做 |
 |---|---|---|
-| **找客户** | 按你的 ICP 上网搜公司、爬官网、找出决策人、推断并验证邮箱。不依赖 Apollo / ZoomInfo | Scout |
+| **说清目标** | 一句自然语言 → ICP（行业 / 规模 / 地区 / 职位 / 附加条件），并列出替你填了什么 | `openvz-leads target` |
+| **找客户** | 按 ICP 上网搜公司、读官网、找出决策人、推断并验证邮箱。不依赖 Apollo / ZoomInfo | Scout |
 | **分析客户** | 每个客户一份简报：他们是做什么的、为什么匹配（打分 + 理由）、采购信号、可能的痛点、决策链、破冰角度、以及**不要说什么** | Profiler |
 | **写开发信** | 基于上面那份简报写 3 封序列，遵守成熟的冷邮件框架和一条严格的「不许编造」规则 | Writer |
+| **等你点头** | 活动进入审核队列。批准之前不会发出任何东西 | 你 |
+| **跟进与回复** | 已配发信通道时投递序列；回复分类后推进阶段，明确拒绝的直接停 | Sender / Handler |
+| **推进阶段** | 已触达 → 已回复 → 已约会面 → 赢单 / 丢单，每一步都记录，可同步到 CRM | `openvz-leads stage` |
 
 然后它停下来。**默认不发信。**
+
+**赢单只能由人来标。** 收件箱里没有任何东西能证明一单成了——一封热情的回信不是合同。同理，一个拒绝编造采购信号的产品，也不该允许自己编造一个成交。
 
 ## 为什么默认不发
 
@@ -86,11 +105,20 @@ openvz-leads train https://your-company.com
 openvz-leads setup
 ```
 
+### 说清你要找谁
+
+```bash
+openvz-leads target "帮我找美国牙科诊所"
+```
+
+它会先把解析结果和替你填的东西打出来，你点头才写进 `openvz-leads.yaml`——而且只替换 `icp:` 这一段，文件其余部分连注释都原样保留。
+
 ### 跑起来
 
 ```bash
 openvz-leads run          # 心跳循环：找 → 分析 → 写 → 排队等你审
 openvz-leads dashboard    # 浏览器打开 http://localhost:5555
+openvz-leads stage        # 看每个人现在在哪一步
 ```
 
 ---
@@ -205,12 +233,14 @@ Regional freight forwarding across the Benelux
 ```
 openvz_leads/
 ├── main.py          心跳循环：静默时段 → 预算 → 决策 → 执行 → 记录 → 睡
-├── brain.py         claude -p 无头封装 + skills 注入
+├── brain.py         模型调用的唯一入口（CLI / OpenAI / DeepSeek）+ skills 注入
 ├── state.py         SQLite（WAL），带线性 schema 迁移
 ├── exporter.py      CSV / Markdown / JSON 导出
 ├── dashboard.py     本地 FastAPI 仪表盘（中英双语）
 ├── config.py        配置加载 + 校验
 ├── trainer.py       从官网学产品
+├── icp.py           一句话 → ICP，并说清替你填了什么   ← 本版新增
+├── pipeline.py      阶段机 + 阶段历史                  ← 本版新增
 │
 ├── agents/
 │   ├── scout.py     找客户（DuckDuckGo → Bing → Google → Serper）
@@ -219,6 +249,11 @@ openvz_leads/
 │   ├── sender.py    投递（可选，只处理已批准的活动）
 │   ├── handler.py   回复分类与应对
 │   └── analyst.py   流水线报表
+│
+├── integrations/
+│   ├── crawler.py   分层读网页：crawl4ai / basic / browser_use  ← 本版新增
+│   ├── crm.py       阶段变化推给 CRM                            ← 本版新增
+│   └── email_finder.py · instantly.py · linkedin.py · calendar.py
 │
 └── models/
     └── profile.py   客户分析的数据结构  ← 本版新增
@@ -242,6 +277,52 @@ skills/     销售知识库，纯 markdown，直接改
 | `profiling.max_per_cycle` | `5` | 每轮最多分析几个 |
 | `usage.max_daily_claude_percent` | `80` | 每天最多用掉多少配额 |
 | `usage.quiet_hours` | 22:00–07:00 | 静默时段 |
+| `model.provider` | `claude_cli` | 谁在思考。见下 |
+| `crawl.provider` | `auto` | 怎么读网页。见下 |
+| `crm.provider` | `none` | 阶段变化推给谁。见下 |
+
+### 换个模型
+
+默认是本机的 Claude Code CLI：不需要 API key，没有第二份账单，这也是「没有额外模型费用」这句话成立的原因。其余三个 provider 是给那个默认服务不了的场合准备的——没有交互式登录的服务器、已经在买 OpenAI 额度的团队、拿不到 Claude CLI 的环境。
+
+```yaml
+model:
+  provider: "claude_cli"   # claude_cli | openai | deepseek | openai_compatible
+  name: ""                 # 留空 = 该 provider 的默认模型
+  base_url: ""             # 只有 openai_compatible 会读
+```
+
+key 放 `.env`：`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，或者用 `MODEL_API_KEY` 统一覆盖。`openai_compatible` 用来接任何说同一套 chat-completions 协议的东西——vLLM、OpenRouter、本地 Ollama。所有 agent 只跟 Brain 说话、从不直接碰 provider，所以这真的就是改一行。
+
+### 怎么读网页
+
+三层，从便宜到贵。`auto` 会挑装了的里面最好的那个，只有拿回来是空的或者被拦了才往下走。
+
+| 层 | 能力 | 装法 |
+|---|---|---|
+| `basic` | httpx + BeautifulSoup。永远可用 | 自带 |
+| `crawl4ai` | 渲染 JavaScript，返回 **Markdown**——模型读到的是文档，而不是脱掉标签的糊字 | `pip install "openvz-leads[crawl]"` |
+| `browser_use` | 一个真的开浏览器的 agent。能过同意墙、能点进不存在于 URL 的页面。慢，而且**要它自己的 API key**（它驱动的是 API 模型，不是 Claude CLI） | `pip install "openvz-leads[browser]"` |
+
+两个都没装也完全正常——那就是这套东西存在之前的行为。桌面安装包**刻意不打包**这两个：它们各自会拖进一整套浏览器运行时，为一个多数人用不到的层把下载体积翻几倍不值得。
+
+浏览器层默认关着，要开得写 `crawl.browser_fallback: true`。
+
+### 同步到 CRM
+
+关系建立之后的事——记录、跟进、推进——本来就该在已经存着你客户的那套系统里。所以每一次阶段变化都是一个事件，都会推过去：
+
+```yaml
+crm:
+  provider: "webhook"      # none | webhook | file
+  webhook_url: "https://your-crm.example.com/hooks/leads"
+```
+
+payload 形状是固定的（只做增量改动），完整定义在 `openvz_leads/integrations/crm.py` 的模块文档里。bearer token 放 `.env` 的 `CRM_WEBHOOK_TOKEN`，不要写进 YAML。`provider: file` 会往 `data/crm-sync.jsonl` 追加，留着以后导入。
+
+**阶段变化不会因为同步失败而丢。** 事件先落本地、标记未同步；推送失败就留在那儿，下一轮心跳重试。只有 4xx（对方说「你这个请求本身就不对」，下次也一样不对）才标记为永久失败，免得它一直堵住后面排队的事件。
+
+事件是**按顺序**发的：一次失败被重放到后面去，会让 CRM 里的记录读起来像「先赢单后触达」。顺序是一段阶段历史里唯一的信息量。
 
 数据库在 `data/leads.db`，普通 SQLite 文件，随便用什么工具打开看。想跑多个工作区（不同产品、不同 ICP），设 `OPENVZ_LEADS_DB` 环境变量指到不同路径即可。
 

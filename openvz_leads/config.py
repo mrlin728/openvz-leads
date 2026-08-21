@@ -52,10 +52,42 @@ class ProductConfig(BaseModel):
 
 
 class ICPConfig(BaseModel):
+    """Who you want to reach.
+
+    The four required fields are what the Scout searches on. The three below
+    them exist because a real request is rarely just four fields: "dental
+    clinics in California with outdated websites and 5-50 employees" carries a
+    qualifier that no industry/size/geo triple can hold, and dropping it on
+    the floor is how a tool returns technically-matching accounts nobody
+    wanted. See openvz_leads/icp.py, which is what fills these in.
+    """
+
     industries: list[str]
     company_size: str
     titles: list[str]
     geography: list[str]
+    # Traits beyond the four fields — "outdated website", "hiring engineers",
+    # "recently funded". Used twice: to shape search queries, and as criteria
+    # the account analysis is told to check rather than assume.
+    keywords: list[str] = []
+    # What rules an account out. Checked in analysis, not in search: a search
+    # engine cannot exclude, but a brief can say "this one does not qualify".
+    exclusions: list[str] = []
+    # The sentence this ICP was parsed from, kept verbatim. It is the only
+    # record of what was actually asked for once the fields are edited.
+    request: str = ""
+
+    @field_validator("keywords", "exclusions", mode="before")
+    @classmethod
+    def _clean_list(cls, v):
+        """Hand-edited YAML: tolerate a bare string, a null, or a list."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, (list, tuple)):
+            return [str(s).strip() for s in v if str(s).strip()]
+        raise ValueError("must be a list of short phrases")
 
 
 class EmailChannelConfig(BaseModel):
@@ -98,6 +130,174 @@ class LinkedInChannelConfig(BaseModel):
 class ChannelsConfig(BaseModel):
     email: EmailChannelConfig = EmailChannelConfig()
     linkedin: LinkedInChannelConfig = LinkedInChannelConfig()
+
+
+class ModelConfig(BaseModel):
+    """Which model does the thinking.
+
+    The default is the Claude Code CLI on your machine: no API key, no second
+    bill, and the reason this product can claim "no extra model cost". The
+    other providers exist for the cases that default cannot serve — a server
+    with no interactive CLI login, a team that already buys OpenAI credit, or
+    somewhere the Claude CLI is not available at all. Everything downstream
+    speaks to the Brain, not to a provider, so switching is a config line.
+    """
+
+    provider: str = "claude_cli"
+    # Blank means "use this provider's default", so switching providers does
+    # not require also knowing a model id. See brain.DEFAULT_MODELS.
+    name: str = ""
+    # Only read for provider "openai_compatible" — the escape hatch for
+    # anything else that speaks the OpenAI chat-completions shape (vLLM,
+    # OpenRouter, a local Ollama). The named providers ignore it.
+    base_url: str = ""
+    temperature: float = 0.3
+    max_tokens: int = 4096
+    # A day's worth of calls at 100%. usage.max_daily_claude_percent is taken
+    # as a percentage of this, which is why the old 200 stays the default.
+    daily_call_budget: int = 200
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        known = {"claude_cli", "openai", "deepseek", "openai_compatible"}
+        normalized = (v or "claude_cli").strip().lower()
+        if normalized not in known:
+            raise ValueError(
+                f"'{v}' is not a supported model provider. Use one of: {sorted(known)}."
+            )
+        return normalized
+
+    @field_validator("temperature")
+    @classmethod
+    def _valid_temperature(cls, v: float) -> float:
+        if not 0.0 <= v <= 2.0:
+            raise ValueError("temperature must be between 0.0 and 2.0")
+        return v
+
+    @field_validator("max_tokens", "daily_call_budget")
+    @classmethod
+    def _positive_int(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("must be at least 1")
+        return v
+
+    @property
+    def needs_api_key(self) -> bool:
+        """True when the provider bills you separately from the CLI."""
+        return self.provider != "claude_cli"
+
+
+class CrawlConfig(BaseModel):
+    """How pages get read.
+
+    Three tiers, in order of what they cost and what they can do:
+
+    - basic       httpx + BeautifulSoup. Always present, no extra install.
+    - crawl4ai    renders JavaScript and returns Markdown, which is what the
+                  model actually wants to read. Optional dependency.
+    - browser_use an agent driving a real browser. Only worth its cost on
+                  pages the first two cannot get through: a consent wall, a
+                  search that only exists behind a click.
+
+    "auto" walks down that list and stops at the first tier that returns
+    something usable, so an install with no optional packages behaves exactly
+    as it did before this setting existed.
+    """
+
+    provider: str = "auto"
+    # Escalate to a real browser when the cheaper tiers come back blocked or
+    # empty. Off by default: it is slow, and most sites do not need it.
+    browser_fallback: bool = False
+    # Past this a homepage is navigation and boilerplate, which only dilutes
+    # the prompt it is being gathered for.
+    max_chars: int = 6000
+    timeout_seconds: float = 30.0
+    # Seconds between page fetches. Politeness, not throttling — one page per
+    # account is already gentle, but a discovery run is not.
+    delay_seconds: float = 1.0
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        known = {"auto", "basic", "crawl4ai", "browser_use"}
+        normalized = (v or "auto").strip().lower()
+        if normalized not in known:
+            raise ValueError(
+                f"'{v}' is not a supported crawl provider. Use one of: {sorted(known)}."
+            )
+        return normalized
+
+    @field_validator("max_chars")
+    @classmethod
+    def _sane_chars(cls, v: int) -> int:
+        if v < 500:
+            raise ValueError("max_chars must be at least 500")
+        return v
+
+    @field_validator("timeout_seconds", "delay_seconds")
+    @classmethod
+    def _non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("must be >= 0")
+        return v
+
+
+class CrmConfig(BaseModel):
+    """Where a deal's stage changes go once they happen.
+
+    OpenVZ Leads owns the pipeline up to the point a person replies. What
+    happens after that — meeting, won, lost — belongs in whatever system
+    already holds your customers. This pushes each stage change there instead
+    of asking you to keep two records in your head.
+
+    provider "none" still records every stage change locally; it just does not
+    tell anyone about it.
+    """
+
+    provider: str = "none"
+    # For "webhook": where to POST. The payload shape is documented in
+    # integrations/crm.py and is stable.
+    webhook_url: str = ""
+    # Sent as a bearer token when set (env: CRM_WEBHOOK_TOKEN wins over this).
+    auth_header: str = "Authorization"
+    # Stages worth telling the CRM about. Earlier ones are noise for most
+    # teams — a prospect that was merely found is not a record yet.
+    #
+    # opted_out is in the default list and should stay there whatever else
+    # you trim: it is the one stage where the CRM not knowing has a cost
+    # beyond tidiness, because someone will eventually mail them from it.
+    sync_stages: list[str] = [
+        "contacted", "replied", "meeting", "won", "lost", "opted_out",
+    ]
+    timeout_seconds: float = 15.0
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        known = {"none", "webhook", "file"}
+        normalized = (v or "none").strip().lower()
+        if normalized not in known:
+            raise ValueError(
+                f"'{v}' is not a supported CRM provider. Use one of: {sorted(known)}."
+            )
+        return normalized
+
+    @field_validator("sync_stages", mode="before")
+    @classmethod
+    def _clean_stages(cls, v):
+        """Tolerate a YAML scalar or nulls — this list is hand-edited."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, (list, tuple)):
+            return [str(s).strip() for s in v if str(s).strip()]
+        raise ValueError("sync_stages must be a list of stage names")
+
+    @property
+    def sync_enabled(self) -> bool:
+        return self.provider != "none"
 
 
 class ReviewConfig(BaseModel):
@@ -195,6 +395,9 @@ class LeadsConfig(BaseModel):
     icp: ICPConfig
     channels: ChannelsConfig = ChannelsConfig()
     review: ReviewConfig = ReviewConfig()
+    model: ModelConfig = ModelConfig()
+    crawl: CrawlConfig = CrawlConfig()
+    crm: CrmConfig = CrmConfig()
     profiling: ProfilingConfig = ProfilingConfig()
     usage: UsageConfig = UsageConfig()
 
@@ -205,6 +408,29 @@ class EnvConfig(BaseModel):
     linkedin_password: str = ""
     hunter_api_key: str = ""
     serper_api_key: str = ""
+    # Only read when model.provider is not the default claude_cli.
+    openai_api_key: str = ""
+    deepseek_api_key: str = ""
+    # For model.provider "openai_compatible": whatever that endpoint wants.
+    model_api_key: str = ""
+    # Bearer token for crm.webhook_url. Kept out of the YAML because the
+    # YAML is the file people paste into issues.
+    crm_webhook_token: str = ""
+
+    def key_for_provider(self, provider: str) -> str:
+        """The API key a model provider needs, or '' for the CLI.
+
+        MODEL_API_KEY is honoured as an override for every remote provider so
+        one variable can drive whichever is configured — useful in a container
+        where the config is baked in and only the secret varies.
+        """
+        if provider == "claude_cli":
+            return ""
+        specific = {
+            "openai": self.openai_api_key,
+            "deepseek": self.deepseek_api_key,
+        }.get(provider, "")
+        return specific or self.model_api_key
 
 
 def _format_validation_error(e: ValidationError) -> str:
@@ -266,6 +492,10 @@ def load_env() -> EnvConfig:
         linkedin_password=os.getenv("LINKEDIN_PASSWORD", "").strip(),
         hunter_api_key=os.getenv("HUNTER_API_KEY", "").strip(),
         serper_api_key=os.getenv("SERPER_API_KEY", "").strip(),
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", "").strip(),
+        model_api_key=os.getenv("MODEL_API_KEY", "").strip(),
+        crm_webhook_token=os.getenv("CRM_WEBHOOK_TOKEN", "").strip(),
     )
     if not env.instantly_api_key:
         # Not a problem: sending is opt-in. Finding, analysing, drafting and

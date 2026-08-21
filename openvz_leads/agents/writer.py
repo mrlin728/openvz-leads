@@ -3,6 +3,7 @@
 import json
 import logging
 
+from openvz_leads import pipeline
 from openvz_leads.brain import Brain
 from openvz_leads.config import LeadsConfig
 from openvz_leads.models.campaign import Campaign, EmailStep
@@ -73,7 +74,10 @@ class Writer:
 
             # Mark prospects so they aren't picked up again
             for p in prospects:
-                await self.state.update_prospect_status(p.id, "queued")
+                await pipeline.advance(
+                    self.state, p.id, "queued",
+                    reason="Outreach drafted", actor="writer",
+                )
 
             await self.state.log_action(
                 action_type="write_campaign",

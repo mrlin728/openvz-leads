@@ -10,30 +10,15 @@ Everything it writes is a hypothesis over collected evidence, and it is
 prompted to say so — see prompts/profiler.md.
 """
 
-import asyncio
 import logging
-import random
-import re
-
-import httpx
-from bs4 import BeautifulSoup
 
 from openvz_leads.brain import Brain
 from openvz_leads.config import LeadsConfig
+from openvz_leads.integrations.crawler import PageReader
 from openvz_leads.models.profile import AccountProfile
 from openvz_leads.state import StateManager
 
 logger = logging.getLogger("openvz_leads.profiler")
-
-HTTP_TIMEOUT = 15.0
-# Enough of a homepage to characterise a company; past this it's navigation
-# and boilerplate, which only dilutes the prompt.
-MAX_SITE_CHARS = 6000
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"
-)
-_WHITESPACE = re.compile(r"\s+")
 
 
 class Profiler:
@@ -41,6 +26,9 @@ class Profiler:
         self.brain = brain
         self.state = state
         self.config = config
+        # One reader per Profiler: it remembers which crawl tiers failed, so
+        # a missing optional package is discovered once rather than per page.
+        self.reader = PageReader(config.crawl)
 
     async def run(self):
         """Analyse the highest-value prospects that haven't been profiled."""
@@ -136,17 +124,28 @@ class Profiler:
                 record.append(f"Notes on record: {company.notes}")
             parts.append("### Company record\n" + "\n".join(record))
 
-        site_text = ""
+        page = None
         url = ""
         if self.config.profiling.fetch_website and company:
             url = company.website or (
                 f"https://{company.domain}" if company.domain else ""
             )
             if url:
-                site_text = await self._fetch_site_text(url)
-        if site_text:
+                page = await self._fetch_site(url)
+        if page:
+            limit = self.config.crawl.max_chars
             parts.append(
-                f"### Their website ({url}), text extract\n{site_text}"
+                f"### Their website ({url}), read via {page.via}\n"
+                f"{page.best_text()[:limit]}"
+            )
+        elif page is not None and page.blocked:
+            # Worth distinguishing: a bot wall is not evidence of anything
+            # about the company, and an analyst reading "unreachable" might
+            # otherwise infer a dead business from a live one.
+            parts.append(
+                "### Their website\nNot available — the site returned a bot "
+                "challenge rather than a page. This says nothing about the "
+                "company. Treat company claims below as unverified."
             )
         else:
             parts.append(
@@ -156,33 +155,19 @@ class Profiler:
 
         return "\n\n".join(parts)
 
-    async def _fetch_site_text(self, url: str) -> str:
-        """Best-effort homepage text. Never raises; returns '' on any failure."""
-        if not url.startswith(("http://", "https://")):
-            url = f"https://{url}"
-        try:
-            async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT, follow_redirects=True
-            ) as client:
-                resp = await client.get(url, headers={"User-Agent": USER_AGENT})
-        except Exception as e:
-            logger.debug(f"Profiler: Could not fetch {url[:80]}: {e}")
-            return ""
+    async def _fetch_site(self, url: str):
+        """Best-effort homepage read. Never raises; may come back empty.
 
-        if resp.status_code != 200 or not resp.text:
-            logger.debug(f"Profiler: {url[:80]} returned {resp.status_code}.")
-            return ""
-
-        try:
-            soup = BeautifulSoup(resp.text, "html.parser")
-        except Exception:
-            return ""
-        for tag in soup(["script", "style", "noscript", "nav", "footer", "svg"]):
-            tag.decompose()
-        text = _WHITESPACE.sub(" ", soup.get_text(" ", strip=True))
-        # Politeness: this is one page per account, but don't hammer.
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        return text[:MAX_SITE_CHARS]
+        Which tier answered is kept and printed into the evidence, because
+        "read as Markdown from a rendered page" and "de-tagged HTML" are not
+        equally trustworthy and the analysis should be able to tell.
+        """
+        page = await self.reader.read(url)
+        if not page:
+            logger.debug(
+                f"Profiler: no tier could read {url[:80]} ({page.attempts})."
+            )
+        return page
 
     # ── Prompt ──
 
@@ -200,6 +185,8 @@ class Profiler:
             company_size=icp.company_size,
             geography=", ".join(icp.geography),
             titles=", ".join(icp.titles),
+            keywords=", ".join(getattr(icp, "keywords", []) or []) or "(none given)",
+            exclusions=", ".join(getattr(icp, "exclusions", []) or []) or "(none given)",
             output_language=self.config.profiling.output_language,
         )
 
@@ -211,7 +198,10 @@ class Profiler:
                 f"Analyse this account as a sales prospect for {product.name} "
                 f"({product.description}). Our ICP: {', '.join(icp.industries)}, "
                 f"{icp.company_size}, {', '.join(icp.geography)}, "
-                f"titles {', '.join(icp.titles)}. Never invent evidence. "
+                f"titles {', '.join(icp.titles)}. "
+                f"Must also match: {', '.join(getattr(icp, 'keywords', []) or []) or 'nothing extra'}. "
+                f"Disqualifiers: {', '.join(getattr(icp, 'exclusions', []) or []) or 'none'}. "
+                f"Never invent evidence. "
                 "Return JSON with keys: fit_score, fit_reasons, risks, "
                 "company_snapshot, buying_signals, pain_hypotheses, "
                 "decision_chain, opening_angles, avoid, confidence, "
