@@ -16,9 +16,21 @@ and bundling it plus a browser would multiply the download for a feature
 most people never turn on.
 """
 
+import re
 import sys
+from pathlib import Path
 
 IS_MAC = sys.platform == "darwin"
+
+# Read the version rather than repeating it. It used to appear here three
+# times and once in packaging/windows-installer.iss, hand-synced — which is
+# how you ship a dmg whose name and whose bundle disagree about what it is.
+# The .app value is the one macOS shows in Get Info.
+VERSION = re.search(
+    r'^version\s*=\s*"([^"]+)"',
+    Path("pyproject.toml").read_text(),
+    re.M,
+).group(1)
 
 datas = [
     ('prompts', 'prompts'),
@@ -80,12 +92,12 @@ if IS_MAC:
         name='OpenVZ Leads.app',
         icon=None,
         bundle_identifier='com.openvzai.leads',
-        version='1.0.0',
+        version=VERSION,
         info_plist={
             'CFBundleName': 'OpenVZ Leads',
             'CFBundleDisplayName': 'OpenVZ Leads',
-            'CFBundleShortVersionString': '1.0.0',
-            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': VERSION,
+            'CFBundleVersion': VERSION,
             'NSHighResolutionCapable': True,
             'LSUIElement': False,
             'NSHumanReadableCopyright': 'MIT. Derived from Harvey by Ethan Rogers.',

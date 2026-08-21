@@ -9,7 +9,13 @@
 ; have no code-signing certificate.
 
 #define AppName        "OpenVZ Leads"
-#define AppVersion     "1.0.0"
+; Passed in by the workflow as /DAppVersion=x.y.z, read from pyproject.toml —
+; the one place the version is written down. Inno cannot read a toml.
+; The fallback is deliberately not a real version: a build that claims
+; 0.0.0-dev is easy to spot, one that claims the last release is not.
+#ifndef AppVersion
+  #define AppVersion   "0.0.0-dev"
+#endif
 #define AppPublisher   "OPENVZ AI"
 #define AppURL         "https://www.openvzai.com/leads"
 #define AppExeName     "OpenVZ Leads.exe"
