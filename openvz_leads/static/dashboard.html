@@ -589,6 +589,123 @@
     nav { padding: 0 10px; }
     .brand .tagline { display: none; }
   }
+  /* ── Insights ─────────────────────────────────────────────────────
+     Chart steps, not brand steps. The header/badge colours sit at OKLCH
+     L 0.67–0.80, which is above the 0.48–0.67 band a dark surface wants
+     for a filled mark — bright saturated fills vibrate against #0f1216
+     and, ordered as they are, blue and purple land ΔE 3.5 apart under
+     deuteranopia. These four are re-stepped into the band and ordered so
+     no adjacent pair fails: worst adjacent pair is ΔE 8.1 simulated /
+     15.2 normal, and the same four pass against a light surface too, so
+     the theme switch does not need a second set. */
+  :root {
+    --chart-1: #a8801f;  /* amber  */
+    --chart-2: #22996a;  /* green  */
+    --chart-3: #4a86d8;  /* blue   */
+    --chart-4: #c95f6b;  /* red    */
+    --chart-grid: rgba(255,255,255,0.07);
+    --chart-track: rgba(255,255,255,0.05);
+  }
+
+  .kpi-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px; margin-bottom: 16px;
+  }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+  }
+  .kpi .label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-3); font-weight: 700;
+  }
+  .kpi .figure {
+    font-size: 30px; font-weight: 750; letter-spacing: -1px; line-height: 1.15;
+    margin-top: 8px; font-variant-numeric: tabular-nums;
+  }
+  /* No data is not zero. A rate with no denominator prints an em dash in
+     muted ink rather than a confident 0%. */
+  .kpi .figure.none { color: var(--text-3); font-weight: 600; }
+  .kpi .sub { font-size: 12px; color: var(--text-3); margin-top: 5px; }
+
+  /* Horizontal bar rows — one shape reused by the funnel, the intent
+     breakdown and the campaign comparison. */
+  .bar-row {
+    display: grid; grid-template-columns: 130px 1fr 92px;
+    align-items: center; gap: 12px; padding: 7px 0;
+  }
+  .bar-row .bar-label {
+    font-size: 12.5px; color: var(--text-2); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bar-track { background: var(--chart-track); border-radius: 4px; height: 9px; }
+  .bar-fill {
+    height: 100%; border-radius: 0 4px 4px 0; background: var(--chart-2);
+    min-width: 2px; transition: width .4s ease;
+  }
+  .bar-fill.c1 { background: var(--chart-1); }
+  .bar-fill.c3 { background: var(--chart-3); }
+  .bar-fill.c4 { background: var(--chart-4); }
+  .bar-fill.muted { background: #4a5361; }
+  .bar-row .bar-value {
+    font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .bar-row .bar-value .of { color: var(--text-3); }
+
+  /* Funnel: the drop between two steps is the number people actually read,
+     so it gets its own line rather than being left as mental arithmetic. */
+  .funnel-step { position: relative; }
+  .funnel-drop {
+    font-size: 11px; color: var(--text-3); padding: 0 0 4px 142px;
+    font-variant-numeric: tabular-nums;
+  }
+  .funnel-drop.bad { color: var(--amber); }
+
+  /* Daily model spend, 14 columns. */
+  .spend-chart {
+    display: flex; align-items: flex-end; gap: 4px; height: 110px;
+    padding-top: 8px; border-bottom: 1px solid var(--chart-grid);
+  }
+  .spend-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+  .spend-col .fill {
+    background: var(--chart-2); border-radius: 4px 4px 0 0; min-height: 2px;
+    transition: height .4s ease;
+  }
+  .spend-col.over .fill { background: var(--chart-4); }
+  .spend-axis {
+    display: flex; gap: 4px; margin-top: 7px;
+    font-size: 10px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  }
+  .spend-axis span { flex: 1; text-align: center; }
+
+  /* Analyst notes. Severity is a word first and a colour second — the tag
+     text carries the meaning on its own. */
+  .note {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 13px 0; border-bottom: 1px solid var(--border);
+    font-size: 13.5px; line-height: 1.6; color: var(--text-2);
+  }
+  .note:last-child { border-bottom: none; }
+  .note .tag {
+    flex-shrink: 0; font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 99px;
+    border: 1px solid currentColor; margin-top: 2px; min-width: 74px; text-align: center;
+  }
+  .note .tag.urgent   { color: var(--chart-4); }
+  .note .tag.action   { color: var(--chart-1); }
+  .note .tag.keep     { color: var(--chart-2); }
+  .note .tag.info     { color: var(--text-3); }
+  .stale {
+    font-size: 11.5px; color: var(--text-3); margin-top: 14px;
+    padding-top: 12px; border-top: 1px dashed var(--border);
+  }
+
+  @media (max-width: 640px) {
+    .bar-row { grid-template-columns: 100px 1fr 76px; gap: 9px; }
+    .funnel-drop { padding-left: 112px; }
+  }
+
 </style>
 </head>
 <body>
@@ -615,6 +732,7 @@
   <button class="active" onclick="showTab('setup', this)" data-i18n="nav.setup">Setup</button>
   <button onclick="showTab('target', this)" data-i18n="nav.target">Target</button>
   <button onclick="showTab('overview', this)" data-i18n="nav.overview">Overview</button>
+  <button onclick="showTab('insights', this)" data-i18n="nav.insights">Insights</button>
   <button onclick="showTab('companies', this)" data-i18n="nav.companies">Companies</button>
   <button onclick="showTab('prospects', this)" data-i18n="nav.contacts">Contacts</button>
   <button onclick="showTab('briefs', this)" data-i18n="nav.briefs">Account briefs</button>
@@ -678,6 +796,15 @@
 <div id="overview" class="section">
   <div class="section-head"><h2 data-i18n="overview.title">Pipeline Overview</h2><p data-i18n="overview.sub">Live counts from OpenVZ Leads' local database. Refreshes automatically.</p></div>
   <div class="stats-grid" id="stats-grid"></div>
+</div>
+
+<!-- Insights -->
+<div id="insights" class="section">
+  <div class="section-head">
+    <h2 data-i18n="insights.title">Insights</h2>
+    <p data-i18n="insights.sub">What the numbers say, and what the Analyst thinks you should do about it. Rates are computed live; the written notes come from the last analysis pass.</p>
+  </div>
+  <div id="insights-body"></div>
 </div>
 
 <!-- Companies -->
@@ -1032,6 +1159,46 @@ const I18N = {
     'nav.campaigns': '活动', 'nav.conversations': '对话', 'nav.export': '导出',
     'nav.activity': '动态', 'nav.settings': '设置', 'nav.controls': '控制台',
     'nav.help': '帮助',
+    'nav.insights': '洞察',
+    'insights.title': '洞察',
+    'insights.sub': '数字说明了什么，以及分析师认为你该怎么办。比率是实时算的；文字建议来自上一次分析。',
+    'insights.replyRate': '回复率',
+    'insights.interestRate': '意向率',
+    'insights.meetingRate': '约见率',
+    'insights.optOutRate': '退订率',
+    'insights.ofContacted': '{contacted} 个已联系里回了 {replied} 个',
+    'insights.ofContactedShort': '在 {contacted} 个已联系的人里',
+    'insights.ofReplies': '{replied} 个回复里约到了 {meeting} 个',
+    'insights.optOutSub': '超过 2% 就有被拉黑的风险',
+    'insights.optOutWarnTitle': '退订率偏高',
+    'insights.optOutWarnBody': '有 {pct}% 的人要求别再联系。超过 2% 就会影响送达率。先停发，收紧 openvz-leads.yaml 里的 icp，把 max_daily_sends 调低，直到名单质量上来。',
+    'insights.funnelTitle': '漏斗',
+    'insights.funnelLede': '每一层「到过」多少人，不是「现在停在」多少人 —— 回过信的人当然也被联系过。「没成」和「已退订」从任何一层都能进，所以不画在这条线上。',
+    'insights.carriedOver': '有 {pct}% 走到了下一层',
+    'insights.noBasis': '上一层还没有人',
+    'insights.notesTitle': '分析师怎么说',
+    'insights.notesLede': '每条都点名了指标、它越过的阈值，以及具体该改哪个文件或配置。',
+    'insights.noNotes': '分析师还没跑过，或者数据还不够。它在空闲周期里跑，报告写在 data/analytics.json。',
+    'insights.lastRun': '这些结论生成于 {when}。比率是刚才实时算的。',
+    'insights.tag.urgent': '紧急',
+    'insights.tag.blocked': '卡住了',
+    'insights.tag.human': '要人工',
+    'insights.tag.action': '该动手',
+    'insights.tag.keep': '别动',
+    'insights.tag.note': '说明',
+    'insights.intentsTitle': '他们回的是什么',
+    'insights.intentsLede': 'Handler 对每一封回信的意图判断。',
+    'insights.campaignsTitle': '各活动表现',
+    'insights.campaignsLede': '按回复率排序。赢的那个的角度和主题行，值得抄进下一个。',
+    'insights.ofN': '共 {n} 人',
+    'insights.spendTitle': 'Claude 用量（近 14 天）',
+    'insights.spendLede': '每天的模型调用次数。峰值 {peak} 次。要压下来：提高 profiling.min_score，或者降低 profiling.max_per_cycle。',
+    'intent.interested': '有意向',
+    'intent.question': '有疑问',
+    'intent.objection': '有异议',
+    'intent.not_interested': '没兴趣',
+    'intent.unsubscribe': '要求退订',
+    'intent.escalate': '需要人工介入',
     'briefs.title': '客户分析',
     'briefs.sub': '每个客户是做什么的、为什么匹配、什么会让他们买单、谁拍板。全部是基于已采集证据的推断——请看置信度那一行。',
     'review.title': '审核队列',
@@ -1327,6 +1494,46 @@ const I18N = {
     'nav.campaigns': 'Campaigns', 'nav.conversations': 'Conversations', 'nav.export': 'Export',
     'nav.activity': 'Activity', 'nav.settings': 'Settings', 'nav.controls': 'Controls',
     'nav.help': 'Help',
+    'nav.insights': 'Insights',
+    'insights.title': 'Insights',
+    'insights.sub': 'What the numbers say, and what the Analyst thinks you should do about it. Rates are computed live; the written notes come from the last analysis pass.',
+    'insights.replyRate': 'Reply rate',
+    'insights.interestRate': 'Interest rate',
+    'insights.meetingRate': 'Meeting rate',
+    'insights.optOutRate': 'Opt-out rate',
+    'insights.ofContacted': '{replied} replied of {contacted} contacted',
+    'insights.ofContactedShort': 'of {contacted} contacted',
+    'insights.ofReplies': '{meeting} booked of {replied} replies',
+    'insights.optOutSub': 'Above 2% risks blacklisting',
+    'insights.optOutWarnTitle': 'Opt-out rate is high',
+    'insights.optOutWarnBody': '{pct}% have asked not to be contacted. Past 2% this starts costing you deliverability. Pause sending, tighten the icp block in openvz-leads.yaml, and lower max_daily_sends until list quality recovers.',
+    'insights.funnelTitle': 'The funnel',
+    'insights.funnelLede': 'How many reached each step, not how many are sitting in it — someone who replied was also contacted. Lost and opted out are reachable from anywhere, so they are not drawn on this line.',
+    'insights.carriedOver': '{pct}% carried through',
+    'insights.noBasis': 'nothing reached the step above',
+    'insights.notesTitle': 'What the Analyst says',
+    'insights.notesLede': 'Each note names the metric, the threshold it crossed, and the file or setting to change.',
+    'insights.noNotes': 'The Analyst has not run yet, or there is not enough data. It runs on idle cycles and writes to data/analytics.json.',
+    'insights.lastRun': 'These conclusions were written {when}. The rates above were computed just now.',
+    'insights.tag.urgent': 'Urgent',
+    'insights.tag.blocked': 'Blocked',
+    'insights.tag.human': 'Needs you',
+    'insights.tag.action': 'Action',
+    'insights.tag.keep': 'Keep',
+    'insights.tag.note': 'Note',
+    'insights.intentsTitle': 'What they wrote back',
+    'insights.intentsLede': "The Handler's read on the intent behind each reply.",
+    'insights.campaignsTitle': 'Campaign performance',
+    'insights.campaignsLede': "Sorted by reply rate. The winner's angle and subject-line style are worth reusing in the next one.",
+    'insights.ofN': 'of {n}',
+    'insights.spendTitle': 'Claude usage, last 14 days',
+    'insights.spendLede': 'Model calls per day. Peak was {peak}. To bring it down: raise profiling.min_score, or lower profiling.max_per_cycle.',
+    'intent.interested': 'Interested',
+    'intent.question': 'Question',
+    'intent.objection': 'Objection',
+    'intent.not_interested': 'Not interested',
+    'intent.unsubscribe': 'Unsubscribe',
+    'intent.escalate': 'Escalate',
     'briefs.title': 'Account briefs',
     'briefs.sub': 'What each account does, why they fit, what would make them buy, and who signs. Every point is a hypothesis over collected evidence — check the confidence line.',
     'review.title': 'Review queue',
@@ -1899,6 +2106,7 @@ function loadCurrentTab() {
     case 'setup': loadSetupStatus(); break;
     case 'target': loadTarget(); break;
     case 'overview': loadStats(); break;
+    case 'insights': loadInsights(); break;
     case 'companies': if (!companyDrill) loadCompanies(); break;
     case 'prospects': loadProspects(); break;
     case 'briefs': loadBriefs(); break;
@@ -2468,6 +2676,193 @@ async function loadStats() {
       escHtml(String(data.claude_calls_today || 0)) + '</b></span>');
 }
 
+// ── Insights ──
+
+// A rate the server could not compute (nothing contacted yet, no replies to
+// divide) comes back as null. It prints as a dash, never as 0% — "no data"
+// and "zero percent" are different claims and one of them is alarming.
+function pct(value) {
+  return (value === null || value === undefined)
+    ? '<span class="none">&mdash;</span>'
+    : escHtml(value.toFixed(1)) + '%';
+}
+
+function kpi(labelKey, value, subText) {
+  const none = (value === null || value === undefined) ? ' none' : '';
+  return '<div class="kpi"><div class="label">' + escHtml(t(labelKey)) + '</div>' +
+    '<div class="figure' + none + '">' + pct(value) + '</div>' +
+    '<div class="sub">' + escHtml(subText) + '</div></div>';
+}
+
+// One horizontal bar. `title` carries the exact numbers on hover; the row
+// itself is directly labelled, so the tooltip is a bonus rather than the
+// only way to read the value.
+function barRow(label, valueHtml, fraction, cls, hover) {
+  const width = Math.max(0, Math.min(1, fraction || 0)) * 100;
+  return '<div class="bar-row" title="' + escHtml(hover || '') + '">' +
+    '<div class="bar-label">' + escHtml(label) + '</div>' +
+    '<div class="bar-track"><div class="bar-fill ' + (cls || '') + '" style="width:' +
+      width.toFixed(1) + '%"></div></div>' +
+    '<div class="bar-value">' + valueHtml + '</div></div>';
+}
+
+function insightsFunnel(funnel) {
+  const byStage = {};
+  funnel.forEach(f => { byStage[f.stage] = f; });
+  // The linear path only. `lost` and `opted_out` are reachable from any
+  // stage, so drawing them as the bottom of a funnel would claim a sequence
+  // that never happened.
+  const path = ['new', 'queued', 'contacted', 'replied', 'meeting', 'won'];
+  const top = Math.max(1, ...path.map(st => (byStage[st] || {}).reached || 0));
+
+  let html = '';
+  let previous = null;
+  for (const stage of path) {
+    const reached = (byStage[stage] || {}).reached || 0;
+    if (previous !== null) {
+      const drop = previous > 0 ? (reached / previous * 100) : null;
+      const cls = (drop !== null && drop < 20 && previous >= 10) ? ' bad' : '';
+      html += '<div class="funnel-drop' + cls + '">&#8595; ' +
+        (drop === null ? escHtml(t('insights.noBasis'))
+                       : escHtml(tf('insights.carriedOver', {pct: drop.toFixed(0)}))) +
+        '</div>';
+    }
+    html += '<div class="funnel-step">' + barRow(
+      t('stage.' + stage),
+      escHtml(String(reached)),
+      reached / top,
+      stage === 'won' ? '' : (reached ? '' : 'muted'),
+      t('stage.' + stage) + ': ' + reached + ' — ' + t('stageDesc.' + stage)
+    ) + '</div>';
+    previous = reached;
+  }
+  return html;
+}
+
+// Reply intents. These are states, not a series set: each row is named in
+// text, and the colour only repeats what the label already says.
+const INTENT_TONE = {
+  interested: '', question: 'c3', objection: 'c1',
+  not_interested: 'muted', unsubscribe: 'c4', escalate: 'c4',
+};
+
+function insightsIntents(intents) {
+  const entries = Object.entries(intents || {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return '';
+  const total = entries.reduce((sum, e) => sum + e[1], 0);
+  const rows = entries.map(([name, count]) => barRow(
+    t('intent.' + name) === 'intent.' + name ? name : t('intent.' + name),
+    escHtml(String(count)) + ' <span class="of">&middot; ' +
+      escHtml((count / total * 100).toFixed(0)) + '%</span>',
+    count / total,
+    INTENT_TONE[name] === undefined ? 'muted' : INTENT_TONE[name],
+    name + ': ' + count + ' / ' + total
+  )).join('');
+  return '<div class="card"><h2>' + escHtml(t('insights.intentsTitle')) + '</h2>' +
+    '<p class="lede">' + escHtml(t('insights.intentsLede')) + '</p>' + rows + '</div>';
+}
+
+function insightsCampaigns(campaigns) {
+  const rated = (campaigns || []).filter(c => c.reply_rate !== null && c.recipients > 0);
+  if (!rated.length) return '';
+  rated.sort((a, b) => b.reply_rate - a.reply_rate);
+  const top = Math.max(1, ...rated.map(c => c.reply_rate));
+  const rows = rated.slice(0, 12).map(c => barRow(
+    c.name || t('campaigns.untitled'),
+    escHtml(c.reply_rate.toFixed(1)) + '% <span class="of">' +
+      escHtml(tf('insights.ofN', {n: c.recipients})) + '</span>',
+    c.reply_rate / top,
+    '',
+    (c.name || '') + ': ' + c.reply_count + ' / ' + c.recipients
+  )).join('');
+  return '<div class="card"><h2>' + escHtml(t('insights.campaignsTitle')) + '</h2>' +
+    '<p class="lede">' + escHtml(t('insights.campaignsLede')) + '</p>' + rows + '</div>';
+}
+
+function insightsSpend(usage) {
+  if (!usage || !usage.length) return '';
+  const top = Math.max(1, ...usage.map(u => u.claude_calls || 0));
+  const cols = usage.map(u => {
+    const n = u.claude_calls || 0;
+    return '<div class="spend-col" title="' + escHtml(u.date + ': ' + n) + '">' +
+      '<div class="fill" style="height:' + (n / top * 100).toFixed(1) + '%"></div></div>';
+  }).join('');
+  const axis = usage.map((u, i) => {
+    // Label the ends and the middle only — fourteen dates side by side
+    // collide into a smear at any width a laptop actually has.
+    const show = (i === 0 || i === usage.length - 1 || i === Math.floor(usage.length / 2));
+    return '<span>' + (show ? escHtml(String(u.date).slice(5)) : '') + '</span>';
+  }).join('');
+  return '<div class="card"><h2>' + escHtml(t('insights.spendTitle')) + '</h2>' +
+    '<p class="lede">' + escHtml(tf('insights.spendLede', {peak: top})) + '</p>' +
+    '<div class="spend-chart">' + cols + '</div>' +
+    '<div class="spend-axis">' + axis + '</div></div>';
+}
+
+// The Analyst prefixes each line with its own severity word. Reuse it rather
+// than re-deriving one, and keep the word visible — the colour is a second
+// encoding, never the only one.
+const NOTE_TAGS = [
+  {prefix: 'URGENT:', cls: 'urgent', key: 'insights.tag.urgent'},
+  {prefix: 'BLOCKED:', cls: 'urgent', key: 'insights.tag.blocked'},
+  {prefix: 'HUMAN NEEDED:', cls: 'urgent', key: 'insights.tag.human'},
+  {prefix: 'ACTION:', cls: 'action', key: 'insights.tag.action'},
+  {prefix: 'KEEP:', cls: 'keep', key: 'insights.tag.keep'},
+];
+
+function insightsNotes(notes, generatedAt) {
+  const body = (notes && notes.length)
+    ? notes.map(text => {
+        const match = NOTE_TAGS.find(tag => text.startsWith(tag.prefix));
+        const label = match ? t(match.key) : t('insights.tag.note');
+        const rest = match ? text.slice(match.prefix.length).trim() : text;
+        return '<div class="note"><span class="tag ' + (match ? match.cls : 'info') + '">' +
+          escHtml(label) + '</span><span>' + escHtml(rest) + '</span></div>';
+      }).join('')
+    : '<p class="lede">' + escHtml(t('insights.noNotes')) + '</p>';
+  const stamp = generatedAt
+    ? '<div class="stale">' + escHtml(tf('insights.lastRun', {when: formatDate(generatedAt)})) + '</div>'
+    : '';
+  return '<div class="card"><h2>' + escHtml(t('insights.notesTitle')) + '</h2>' +
+    '<p class="lede">' + escHtml(t('insights.notesLede')) + '</p>' + body + stamp + '</div>';
+}
+
+async function loadInsights() {
+  const el = document.getElementById('insights-body');
+  const data = await api('/api/analytics');
+  if (!data) { el.innerHTML = offlineState(); return; }
+
+  const rates = data.rates || {};
+  const totals = data.totals || {};
+
+  const kpis = '<div class="kpi-row">' +
+    kpi('insights.replyRate', rates.reply,
+        tf('insights.ofContacted', {replied: totals.replied || 0, contacted: totals.contacted || 0})) +
+    kpi('insights.interestRate', rates.interested,
+        tf('insights.ofContactedShort', {contacted: totals.contacted || 0})) +
+    kpi('insights.meetingRate', rates.meeting,
+        tf('insights.ofReplies', {meeting: totals.meeting || 0, replied: totals.replied || 0})) +
+    kpi('insights.optOutRate', rates.opt_out, t('insights.optOutSub')) +
+  '</div>';
+
+  // The one number that can mean "stop sending today".
+  const optOut = rates.opt_out;
+  const warning = (optOut !== null && optOut !== undefined && optOut > 2 && (totals.contacted || 0) > 10)
+    ? '<div class="card" style="border-color:var(--chart-4)"><h2>' +
+      escHtml(t('insights.optOutWarnTitle')) + '</h2><p class="lede">' +
+      escHtml(tf('insights.optOutWarnBody', {pct: optOut.toFixed(1)})) + '</p></div>'
+    : '';
+
+  el.innerHTML = warning + kpis +
+    '<div class="card"><h2>' + escHtml(t('insights.funnelTitle')) + '</h2>' +
+    '<p class="lede">' + escHtml(t('insights.funnelLede')) + '</p>' +
+    insightsFunnel(data.funnel || []) + '</div>' +
+    insightsNotes(data.insights, data.insights_generated_at) +
+    insightsIntents(data.intents) +
+    insightsCampaigns(data.campaigns) +
+    insightsSpend(data.usage);
+}
+
 async function loadCompanies() {
   companyDrill = false;
   const el = document.getElementById('companies-list');
@@ -2676,6 +3071,7 @@ setInterval(() => {
   switch (currentTab) {
     case 'setup': loadSetupStatus(); break;
     case 'overview': loadStats(); break;
+    case 'insights': loadInsights(); break;
     case 'companies': if (!companyDrill) loadCompanies(); break;
     case 'prospects': loadProspects(); break;
     case 'briefs': loadBriefs(); break;

@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from openvz_leads import paths
+from openvz_leads import paths, pipeline
 from openvz_leads.state import _default_db_path
 
 logger = logging.getLogger("openvz_leads.dashboard")
@@ -792,6 +792,133 @@ async def get_conversations():
         except (json.JSONDecodeError, TypeError):
             row["thread"] = []
     return rows
+
+
+# ── Insights ──
+
+
+def _rate(part: int, whole: int) -> float | None:
+    """A percentage, or None when the denominator makes it meaningless.
+
+    Returning 0.0 for "nothing sent yet" would draw a bar at zero and read as
+    a bad reply rate, which is a different claim from having no data.
+    """
+    if not whole:
+        return None
+    return round(part / whole * 100, 1)
+
+
+@app.get("/api/analytics")
+async def get_analytics():
+    """Everything the Insights tab shows.
+
+    Counts are computed live rather than read from data/analytics.json: the
+    Analyst only runs on idle cycles, so its file can be hours old, and a
+    funnel that disagrees with the Overview tab is worse than no funnel.
+
+    The written insights *are* taken from the file, because they are the one
+    part that is not derivable from a count — and the file's own timestamp is
+    passed through so the page can say how old they are.
+    """
+    stage_rows = await query_db("SELECT status, COUNT(*) AS n FROM prospects GROUP BY status")
+    stages = {row["status"]: row["n"] for row in stage_rows}
+
+    intent_rows = await query_db(
+        "SELECT intent, COUNT(*) AS n FROM conversations WHERE intent != '' GROUP BY intent"
+    )
+    intents = {row["intent"]: row["n"] for row in intent_rows}
+
+    # Reached-at-least-once, not currently-sitting-in: a prospect who replied
+    # was contacted, and a funnel that forgets that shows contact falling to
+    # zero the moment it starts working.
+    #
+    # This is read from stage_events rather than inferred by summing the
+    # stages after it in STAGES, because two of them are not further down any
+    # funnel: `lost` and `opted_out` are reachable from anywhere. Summing the
+    # tail would count someone who opted out while still `queued` as having
+    # been contacted, and quietly inflate every rate below it.
+    reached_rows = await query_db(
+        """SELECT to_stage AS stage, COUNT(DISTINCT prospect_id) AS n
+           FROM stage_events WHERE to_stage != '' GROUP BY to_stage"""
+    )
+    reached = {row["stage"]: row["n"] for row in reached_rows}
+    # A prospect whose stage predates stage_events has no event for where it
+    # is now. Its current stage is the one thing we do know it reached.
+    for stage, resting in stages.items():
+        reached[stage] = max(reached.get(stage, 0), resting)
+    contacted = reached.get("contacted", 0)
+    replied = reached.get("replied", 0)
+    meeting = reached.get("meeting", 0)
+    won = stages.get("won", 0)
+    opted_out = stages.get("opted_out", 0)
+
+    campaigns = await query_db(
+        """SELECT c.id, c.name, c.status, c.prospect_ids_json, c.created_at,
+                  COUNT(v.id) AS reply_count,
+                  SUM(CASE WHEN v.intent = 'interested' THEN 1 ELSE 0 END) AS interested_count,
+                  SUM(CASE WHEN v.intent = 'objection' THEN 1 ELSE 0 END) AS objection_count
+           FROM campaigns c
+           LEFT JOIN conversations v ON v.campaign_id = c.id
+           WHERE c.status IN ('active', 'completed')
+           GROUP BY c.id
+           ORDER BY c.created_at DESC
+           LIMIT 25"""
+    )
+    for row in campaigns:
+        try:
+            recipients = len(json.loads(row.pop("prospect_ids_json", "") or "[]"))
+        except (json.JSONDecodeError, TypeError):
+            recipients = 0
+        row["recipients"] = recipients
+        row["reply_count"] = row.get("reply_count") or 0
+        row["interested_count"] = row.get("interested_count") or 0
+        row["objection_count"] = row.get("objection_count") or 0
+        row["reply_rate"] = _rate(row["reply_count"], recipients)
+
+    # Model spend over the last fortnight, so "it is using too much Claude"
+    # is a shape on a chart rather than a hunch.
+    usage = await query_db(
+        "SELECT date, claude_calls FROM usage_log ORDER BY date DESC LIMIT 14"
+    )
+    usage.reverse()
+
+    insights: list[str] = []
+    generated_at = ""
+    report_path = DB_PATH.parent / "analytics.json"
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if isinstance(report, dict):
+            raw = report.get("insights")
+            insights = [str(i) for i in raw if str(i).strip()] if isinstance(raw, list) else []
+            generated_at = str(report.get("generated_at") or "")
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass  # the Analyst has not run yet, or wrote something unreadable
+
+    return {
+        "funnel": [
+            {"stage": stage, "reached": reached.get(stage, 0), "resting": stages.get(stage, 0)}
+            for stage in pipeline.STAGES
+        ],
+        "rates": {
+            "reply": _rate(replied, contacted),
+            "meeting": _rate(meeting, replied),
+            "won": _rate(won, meeting),
+            "opt_out": _rate(opted_out + intents.get("unsubscribe", 0), contacted),
+            "interested": _rate(intents.get("interested", 0), contacted),
+        },
+        "totals": {
+            "contacted": contacted,
+            "replied": replied,
+            "meeting": meeting,
+            "won": won,
+            "opted_out": opted_out,
+        },
+        "intents": intents,
+        "campaigns": campaigns,
+        "usage": usage,
+        "insights": insights,
+        "insights_generated_at": generated_at,
+    }
 
 
 @app.get("/api/activity")
