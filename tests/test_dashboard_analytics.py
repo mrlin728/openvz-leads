@@ -140,3 +140,25 @@ async def test_intents_feed_the_reply_breakdown(client):
     assert body["intents"] == {"interested": 1, "objection": 1, "unsubscribe": 1}
     # opted_out prospect + the unsubscribe reply, over 3 contacted.
     assert body["rates"]["opt_out"] == pytest.approx(66.7, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_analyst_stamps_its_report_with_an_offset(tmp_path):
+    """The timestamp must carry its zone.
+
+    The Insights tab renders it through JavaScript's Date(), which reads a
+    zone-less string as local time — so a naive UTC stamp was shown shifted
+    by the reader's own offset.
+    """
+    from datetime import datetime
+
+    from openvz_leads.agents.analyst import Analyst
+
+    state = StateManager(str(tmp_path / "leads.db"))
+    await state.init_db()
+    await Analyst(state).run()
+
+    report = json.loads((tmp_path / "analytics.json").read_text(encoding="utf-8"))
+    stamped = datetime.fromisoformat(report["generated_at"])
+    assert stamped.tzinfo is not None, f"no offset on {report['generated_at']!r}"
+    assert stamped.utcoffset().total_seconds() == 0
