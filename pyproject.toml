@@ -65,3 +65,8 @@ openvz-leads = "openvz_leads.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["openvz_leads*"]
+
+# The dashboard page is a real file rather than a string in dashboard.py, so it
+# has to be installed alongside the code — a wheel without it serves a stub.
+[tool.setuptools.package-data]
+openvz_leads = ["static/*.html", "static/*.css", "static/*.js"]

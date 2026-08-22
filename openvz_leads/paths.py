@@ -103,6 +103,26 @@ def ensure_workspace() -> Path:
     return ws
 
 
+def static_dir() -> Path:
+    """Read-only web assets shipped with the package.
+
+    These are not seeded into the workspace the way prompts/ and skills/ are:
+    the dashboard page is code, not something a user is invited to fork, and a
+    stale copy left behind by an upgrade would be a page whose markup no longer
+    matches the API serving it. Under PyInstaller the package directory is
+    extracted beneath _MEIPASS, so the normal path resolves; the bundle_root()
+    fallback covers a spec that places the assets at the archive root instead.
+    """
+    beside_package = Path(__file__).resolve().parent / "static"
+    if beside_package.is_dir():
+        return beside_package
+    return bundle_root() / "openvz_leads" / "static"
+
+
+def static_file(name: str) -> Path:
+    return static_dir() / name
+
+
 # ── Convenience accessors ────────────────────────────────────────────
 
 def prompts_dir() -> Path:
