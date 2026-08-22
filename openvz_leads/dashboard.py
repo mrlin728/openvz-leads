@@ -803,6 +803,7 @@ async def get_pending_review():
             prospect_ids = []
         row["prospect_ids"] = prospect_ids
         row["recipients"] = []
+        row["checks"] = {"avoid": [], "evidence_gaps": [], "low_confidence": 0}
         if prospect_ids:
             placeholders = ",".join("?" for _ in prospect_ids)
             row["recipients"] = await query_db(
@@ -811,7 +812,60 @@ async def get_pending_review():
                     ORDER BY score DESC LIMIT 50""",
                 tuple(prospect_ids),
             )
+            # The copy was written from these briefs, and the two things the
+            # Profiler is required to declare — what it could not evidence,
+            # and what must not be claimed — are exactly what a reviewer is
+            # here to check the draft against. Reading them in another tab
+            # is the same as not reading them.
+            row["checks"] = await _review_checks(prospect_ids, placeholders)
     return rows
+
+
+async def _review_checks(prospect_ids: list[str], placeholders: str) -> dict:
+    """Collect the do-not-say list and evidence gaps behind a campaign."""
+    brief_rows = await query_db(
+        f"""SELECT company, profile_json FROM prospects
+            WHERE id IN ({placeholders}) AND profile_json != '' AND profile_json IS NOT NULL""",
+        tuple(prospect_ids),
+    )
+    # Grouped by the warning, not by the account. The Profiler tends to raise
+    # the same gap across a whole segment — "no pricing page" on eleven
+    # dental practices is one thing to check, not eleven — and listing it
+    # once per company buries the warning that only came up on one.
+    avoid: dict[str, set[str]] = {}
+    gaps: dict[str, set[str]] = {}
+    low_confidence = 0
+    for brief_row in brief_rows:
+        try:
+            brief = json.loads(brief_row.get("profile_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(brief, dict):
+            continue
+        if str(brief.get("confidence") or "").lower() == "low":
+            low_confidence += 1
+        company = brief_row.get("company") or ""
+        for key, sink in (("avoid", avoid), ("evidence_gaps", gaps)):
+            for item in brief.get(key) or []:
+                text = str(item).strip()
+                if text:
+                    sink.setdefault(text, set()).add(company)
+
+    def _rank(grouped: dict[str, set[str]]) -> list[dict]:
+        """Most widely applicable first, then alphabetically for a stable order."""
+        return [
+            {"text": text, "accounts": sorted(c for c in companies if c)}
+            for text, companies in sorted(
+                grouped.items(), key=lambda kv: (-len(kv[1]), kv[0])
+            )
+        ][:20]
+
+    return {
+        "avoid": _rank(avoid),
+        "evidence_gaps": _rank(gaps),
+        "low_confidence": low_confidence,
+        "briefed": len(brief_rows),
+    }
 
 
 @app.post("/api/review/{campaign_id}")
@@ -840,6 +894,34 @@ async def decide_review(campaign_id: str, request: Request):
             {"error": "That campaign is no longer awaiting review."}, status_code=409
         )
     return {"ok": True, "status": "approved" if approved else "rejected"}
+
+
+@app.post("/api/review/{campaign_id}/sequence")
+async def edit_review_sequence(campaign_id: str, request: Request):
+    """Save a reviewer's edits to a draft that is still awaiting review."""
+    from openvz_leads.state import StateManager
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sequence = body.get("sequence")
+    if not isinstance(sequence, list):
+        return JSONResponse(
+            {"error": "Body must include 'sequence': a list of steps."}, status_code=400
+        )
+
+    state = StateManager(str(DB_PATH))
+    try:
+        merged = await state.edit_pending_sequence(campaign_id, sequence)
+    except Exception as e:
+        logger.exception("Failed to save review edits for %s", campaign_id)
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if merged is None:
+        return JSONResponse(
+            {"error": "That campaign is no longer open for editing."}, status_code=409
+        )
+    return {"ok": True, "sequence": merged}
 
 
 @app.get("/api/profiles")

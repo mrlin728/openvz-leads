@@ -763,6 +763,52 @@
     .result-count { margin-left: 0; width: 100%; }
   }
 
+  /* ── Review: editing a draft before it goes out ── */
+  .review-card.is-editing { border-color: var(--accent-deep); }
+  .email-step.editing { background: var(--panel-raised); border-radius: 9px; padding: 14px; }
+  .edit-subject, .edit-body {
+    width: 100%; background: var(--bg); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 10px 12px; color: var(--text);
+    font-family: inherit; font-size: 13.5px; line-height: 1.6; margin-top: 8px;
+  }
+  .edit-subject { font-weight: 600; }
+  .edit-body { resize: vertical; min-height: 110px; }
+  .edit-subject:focus, .edit-body:focus {
+    outline: none; border-color: var(--accent-deep);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .delay-label { color: var(--text-3); }
+  .delay-input {
+    width: 52px; background: var(--bg); border: 1px solid var(--border-strong);
+    border-radius: 6px; padding: 2px 6px; color: var(--text);
+    font-family: inherit; font-size: 12px;
+  }
+  /* Shown, never enforced. A person editing their own outreach decides how
+     long it is; they should still be able to see that a follow-up meant to
+     run 40 words is now running 300. */
+  .wc { color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .wc.over { color: var(--amber); font-weight: 600; }
+
+  /* What the brief could not evidence, and what must not be said. The point
+     of the review queue is checking the draft against these two lists, and
+     until now they lived in a different tab. */
+  .check-block {
+    border-left: 2px solid var(--border-strong);
+    padding: 2px 0 2px 14px; margin: 0 0 16px; font-size: 12.5px;
+  }
+  .check-block.avoid { border-left-color: var(--red); }
+  .check-block.gaps { border-left-color: var(--amber); }
+  .check-block h4 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 700; margin-bottom: 4px;
+  }
+  .check-block.avoid h4 { color: var(--red); }
+  .check-block.gaps h4 { color: var(--amber); }
+  .check-block p { color: var(--text-3); margin-bottom: 6px; line-height: 1.5; }
+  .check-block ul { margin: 0; padding-left: 16px; }
+  .check-block li { color: var(--text-2); line-height: 1.6; margin-top: 3px; }
+  .check-block .who { color: var(--text-3); font-size: 11.5px; }
+
 </style>
 </head>
 <body>
@@ -1249,6 +1295,21 @@ const I18N = {
     'nav.activity': '动态', 'nav.settings': '设置', 'nav.controls': '控制台',
     'nav.help': '帮助',
     'nav.insights': '洞察',
+    'review.edit': '改一下',
+    'review.saveEdits': '保存改动',
+    'review.cancelEdits': '不改了',
+    'review.editSaved': '改动已保存。还没发出去 —— 还得你点通过。',
+    'review.editFailed': '这个活动已经不能改了。',
+    'review.subject': '主题行',
+    'review.delayDays': '间隔天数',
+    'review.words': '{words}/{limit} 词',
+    'review.avoidTitle': '不要说',
+    'review.avoidLede': '客户分析明确列出不能讲的话。对着草稿核一遍。',
+    'review.gapsTitle': '证据缺口',
+    'review.gapsLede': '分析没能查证的部分。凡是把这些当事实写进去的句子，都是编的。',
+    'review.lowConfTitle': '低置信度分析',
+    'review.lowConfLede': '这批人里有 {n} 个的分析自评为「低置信度」。里面的说法先别当真。',
+    'review.acrossN': '（{n} 家）',
     'list.searchContacts': '搜姓名、邮箱、公司、职位',
     'list.searchCompanies': '搜名称、域名、行业、地区',
     'list.allStages': '所有阶段',
@@ -1602,6 +1663,21 @@ const I18N = {
     'nav.activity': 'Activity', 'nav.settings': 'Settings', 'nav.controls': 'Controls',
     'nav.help': 'Help',
     'nav.insights': 'Insights',
+    'review.edit': 'Edit',
+    'review.saveEdits': 'Save changes',
+    'review.cancelEdits': 'Cancel',
+    'review.editSaved': 'Changes saved. Still nothing sent — it needs your approval.',
+    'review.editFailed': 'That campaign is no longer open for editing.',
+    'review.subject': 'Subject line',
+    'review.delayDays': 'delay, days',
+    'review.words': '{words}/{limit} words',
+    'review.avoidTitle': 'Do not say',
+    'review.avoidLede': 'The brief named these as things not to claim. Check the draft against them.',
+    'review.gapsTitle': 'Evidence gaps',
+    'review.gapsLede': 'What the analysis could not evidence. Any sentence that states one of these as fact is invented.',
+    'review.lowConfTitle': 'Low-confidence briefs',
+    'review.lowConfLede': '{n} of these accounts were analysed with low confidence. Treat their claims as guesses.',
+    'review.acrossN': 'across {n} accounts',
     'list.searchContacts': 'Search name, email, company, title',
     'list.searchCompanies': 'Search name, domain, industry, location',
     'list.allStages': 'Every stage',
@@ -2349,60 +2425,206 @@ function updateReviewCount(n) {
   el.classList.toggle('on', n > 0);
 }
 
-async function loadReview() {
-  const el = document.getElementById('review-list');
-  const rows = await api('/api/review/pending');
-  if (rows === null) { el.innerHTML = offlineState(); return; }
-  updateReviewCount(rows.length);
-  if (!rows.length) {
-    el.innerHTML = emptyState('&#10003;', t('review.empty'), t('review.emptyCopy'));
-    return;
+// Word limits the Writer works to. Shown, never enforced: a person editing
+// their own outreach is the authority on its length, but a follow-up that
+// has quietly grown to 300 words is worth noticing before it goes out.
+const STEP_WORD_LIMITS = {1: 75, 2: 75, 3: 40};
+
+function wordCount(text) {
+  return String(text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Which campaigns are open in the editor, so a re-render does not throw
+// away half-typed copy.
+const _editing = new Set();
+let _reviewRows = [];
+
+function reviewStepView(step) {
+  const delay = Number(step.delay_days || 0);
+  const when = delay === 0 ? t('review.sendsImmediately') : tf('review.daysLater', {days: delay});
+  const limit = STEP_WORD_LIMITS[step.step];
+  const words = wordCount(step.body);
+  const over = limit && words > limit;
+  return '<div class="email-step">' +
+    '<div class="when">' + escHtml(tf('review.emailN', {step: step.step || '?'})) +
+      ' &middot; ' + escHtml(when) +
+      (limit ? ' &middot; <span class="wc' + (over ? ' over' : '') + '">' +
+        escHtml(tf('review.words', {words: words, limit: limit})) + '</span>' : '') +
+    '</div>' +
+    '<div class="subject">' + escHtml(step.subject || '') + '</div>' +
+    '<div class="body-text">' + escHtml(step.body || '') + '</div>' +
+  '</div>';
+}
+
+function reviewStepEditor(id, step, index) {
+  const limit = STEP_WORD_LIMITS[step.step];
+  const words = wordCount(step.body);
+  return '<div class="email-step editing">' +
+    '<div class="when">' + escHtml(tf('review.emailN', {step: step.step || '?'})) +
+      ' &middot; <label class="delay-label">' + escHtml(t('review.delayDays')) +
+      ' <input type="number" min="0" class="delay-input" id="d-' + id + '-' + index +
+        '" value="' + escHtml(String(Number(step.delay_days || 0))) + '"></label>' +
+      (limit ? ' &middot; <span class="wc" id="wc-' + id + '-' + index + '">' +
+        escHtml(tf('review.words', {words: words, limit: limit})) + '</span>' : '') +
+    '</div>' +
+    '<input class="edit-subject" id="s-' + id + '-' + index + '" value="' +
+      escHtml(step.subject || '') + '" placeholder="' + escHtml(t('review.subject')) + '">' +
+    '<textarea class="edit-body" id="b-' + id + '-' + index + '" rows="6" ' +
+      'oninput="recountWords(\'' + id + '\', ' + index + ', ' + (limit || 0) + ')">' +
+      escHtml(step.body || '') + '</textarea>' +
+  '</div>';
+}
+
+function recountWords(id, index, limit) {
+  if (!limit) return;
+  const el = document.getElementById('wc-' + id + '-' + index);
+  const box = document.getElementById('b-' + id + '-' + index);
+  if (!el || !box) return;
+  const words = wordCount(box.value);
+  el.textContent = tf('review.words', {words: words, limit: limit});
+  el.classList.toggle('over', words > limit);
+}
+
+// The two lists the Profiler is required to produce. They are the reason the
+// briefs exist: they are what stops a rep repeating something the analysis
+// never actually evidenced.
+function reviewChecks(checks) {
+  if (!checks) return '';
+  const blocks = [];
+  // Each entry names the accounts it came from, so "this one practice" and
+  // "all eleven of them" do not read the same.
+  const checkItem = item => '<li>' + escHtml(item.text) +
+    ((item.accounts || []).length
+      ? ' <span class="who">' + escHtml(item.accounts.length > 3
+          ? tf('review.acrossN', {n: item.accounts.length})
+          : item.accounts.join(', ')) + '</span>'
+      : '') + '</li>';
+
+  if ((checks.avoid || []).length) {
+    blocks.push('<div class="check-block avoid"><h4>' + escHtml(t('review.avoidTitle')) + '</h4>' +
+      '<p>' + escHtml(t('review.avoidLede')) + '</p><ul>' +
+      checks.avoid.map(checkItem).join('') + '</ul></div>');
   }
+  if ((checks.evidence_gaps || []).length) {
+    blocks.push('<div class="check-block gaps"><h4>' + escHtml(t('review.gapsTitle')) + '</h4>' +
+      '<p>' + escHtml(t('review.gapsLede')) + '</p><ul>' +
+      checks.evidence_gaps.map(checkItem).join('') + '</ul></div>');
+  }
+  if (checks.low_confidence) {
+    blocks.push('<div class="check-block gaps"><h4>' + escHtml(t('review.lowConfTitle')) + '</h4>' +
+      '<p>' + escHtml(tf('review.lowConfLede', {n: checks.low_confidence})) + '</p></div>');
+  }
+  return blocks.join('');
+}
 
-  el.innerHTML = rows.map(c => {
-    const steps = (c.sequence || []).map(s => {
-      const delay = Number(s.delay_days || 0);
-      const when = delay === 0
-        ? t('review.sendsImmediately')
-        : tf('review.daysLater', {days: delay});
-      return '<div class="email-step">' +
-        '<div class="when">' + escHtml(tf('review.emailN', {step: s.step || '?'})) +
-          ' &middot; ' + escHtml(when) + '</div>' +
-        '<div class="subject">' + escHtml(s.subject || '') + '</div>' +
-        '<div class="body-text">' + escHtml(s.body || '') + '</div>' +
-      '</div>';
-    }).join('');
+function renderReviewCard(c) {
+  const id = escHtml(c.id);
+  const editing = _editing.has(c.id);
+  const steps = (c.sequence || [])
+    .map((step, i) => editing ? reviewStepEditor(id, step, i) : reviewStepView(step))
+    .join('');
 
-    const recipients = (c.recipients || []).map(r =>
-      '<li>' + escHtml([r.first_name, r.last_name].filter(Boolean).join(' ')) +
-      ' — ' + escHtml(r.title || '') + ', ' + escHtml(r.company || '') +
-      (r.email ? ' &middot; ' + escHtml(r.email) : '') + '</li>'
-    ).join('');
+  const recipients = (c.recipients || []).map(r =>
+    '<li>' + escHtml([r.first_name, r.last_name].filter(Boolean).join(' ')) +
+    ' — ' + escHtml(r.title || '') + ', ' + escHtml(r.company || '') +
+    (r.email ? ' &middot; ' + escHtml(r.email) : '') + '</li>'
+  ).join('');
 
-    const recipientBlock = recipients
-      ? '<div class="brief-block" style="margin-top:18px"><h4>' +
-        escHtml(tf('review.recipientsWithCount', {count: (c.prospect_ids || []).length})) + '</h4>' +
-        '<ul>' + recipients + '</ul></div>'
-      : '';
+  const recipientBlock = recipients
+    ? '<div class="brief-block" style="margin-top:18px"><h4>' +
+      escHtml(tf('review.recipientsWithCount', {count: (c.prospect_ids || []).length})) + '</h4>' +
+      '<ul>' + recipients + '</ul></div>'
+    : '';
 
-    const id = escHtml(c.id);
-    return '<div class="review-card" id="rc-' + id + '">' +
-      '<div class="head"><div>' +
-        '<div class="title">' + escHtml(c.name || '—') + '</div>' +
-        '<div class="meta">' +
-          escHtml(tf('review.emailCount', {count: (c.sequence || []).length})) + ' &middot; ' +
-          escHtml(tf('review.recipientCount', {count: (c.prospect_ids || []).length})) + '</div>' +
-      '</div>' + badge(c.status) + '</div>' +
-      '<div class="body">' + steps + recipientBlock + '</div>' +
-      '<div class="review-actions">' +
+  const actions = editing
+    ? '<div class="review-actions">' +
+        '<button class="btn btn-primary btn-sm" onclick="saveReviewEdits(\'' + id + '\')">' +
+          escHtml(t('review.saveEdits')) + '</button>' +
+        '<button class="btn btn-secondary btn-sm" onclick="cancelReviewEdits(\'' + id + '\')">' +
+          escHtml(t('review.cancelEdits')) + '</button>' +
+      '</div>'
+    : '<div class="review-actions">' +
         '<input id="note-' + id + '" placeholder="' + escHtml(t('review.notePlaceholder')) + '">' +
+        '<button class="btn btn-secondary btn-sm" onclick="startReviewEdits(\'' + id + '\')">' +
+          escHtml(t('review.edit')) + '</button>' +
         '<button class="btn btn-primary btn-sm" onclick="decideReview(\'' + id + '\', true)">' +
           escHtml(t('review.approve')) + '</button>' +
         '<button class="btn btn-danger btn-sm" onclick="decideReview(\'' + id + '\', false)">' +
           escHtml(t('review.reject')) + '</button>' +
-      '</div>' +
-    '</div>';
-  }).join('');
+      '</div>';
+
+  return '<div class="review-card' + (editing ? ' is-editing' : '') + '" id="rc-' + id + '">' +
+    '<div class="head"><div>' +
+      '<div class="title">' + escHtml(c.name || '—') + '</div>' +
+      '<div class="meta">' +
+        escHtml(tf('review.emailCount', {count: (c.sequence || []).length})) + ' &middot; ' +
+        escHtml(tf('review.recipientCount', {count: (c.prospect_ids || []).length})) + '</div>' +
+    '</div>' + badge(c.status) + '</div>' +
+    '<div class="body">' + reviewChecks(c.checks) + steps + recipientBlock + '</div>' +
+    actions +
+  '</div>';
+}
+
+function renderReview() {
+  const el = document.getElementById('review-list');
+  if (!_reviewRows.length) {
+    el.innerHTML = emptyState('&#10003;', t('review.empty'), t('review.emptyCopy'));
+    return;
+  }
+  el.innerHTML = _reviewRows.map(renderReviewCard).join('');
+}
+
+async function loadReview() {
+  const el = document.getElementById('review-list');
+  const rows = await api('/api/review/pending');
+  if (rows === null) { el.innerHTML = offlineState(); return; }
+  _reviewRows = rows;
+  updateReviewCount(rows.length);
+  // Editors that no longer have a campaign behind them (approved elsewhere,
+  // rejected from the CLI) are dropped rather than left pointing at nothing.
+  const live = new Set(rows.map(r => r.id));
+  [..._editing].forEach(id => { if (!live.has(id)) _editing.delete(id); });
+  renderReview();
+}
+
+function startReviewEdits(id) {
+  _editing.add(id);
+  renderReview();
+}
+
+function cancelReviewEdits(id) {
+  _editing.delete(id);
+  renderReview();
+}
+
+async function saveReviewEdits(id) {
+  const campaign = _reviewRows.find(c => c.id === id);
+  if (!campaign) return;
+  const sequence = (campaign.sequence || []).map((step, i) => {
+    const subject = document.getElementById('s-' + id + '-' + i);
+    const bodyEl = document.getElementById('b-' + id + '-' + i);
+    const delay = document.getElementById('d-' + id + '-' + i);
+    return {
+      step: step.step,
+      subject: subject ? subject.value : step.subject,
+      body: bodyEl ? bodyEl.value : step.body,
+      delay_days: delay ? Number(delay.value) : step.delay_days,
+    };
+  });
+
+  const res = await apiWithError('/api/review/' + encodeURIComponent(id) + '/sequence', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({sequence: sequence}),
+  });
+  if (!res.ok) {
+    showToast((res.data && res.data.error) || t('review.editFailed'), 'error');
+    return;
+  }
+  campaign.sequence = res.data.sequence || sequence;
+  _editing.delete(id);
+  renderReview();
+  showToast(t('review.editSaved'), 'success');
 }
 
 async function decideReview(id, approved) {
