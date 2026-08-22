@@ -104,3 +104,75 @@ def test_every_campaign_status_has_a_badge_style():
         "draft", "pending_review", "approved", "rejected", "active", "failed",
     ):
         assert f".badge-{status}" in html, f"no badge style for campaign status {status!r}"
+
+
+# ── Theming ──
+
+def _css(html: str) -> str:
+    return html[: html.index("</style>")]
+
+
+def test_every_theme_token_is_defined_in_both_palettes():
+    """A token defined only on :root keeps its dark value under the light theme.
+
+    That is how the toast ended up as near-black behind the light theme's
+    darker accent text: the ink moved and the surface did not.
+    """
+    import re
+
+    css = _css(dashboard._read_page())
+    dark_block = css[css.index(":root {"): css.index('[data-theme="light"]')]
+    dark = set(re.findall(r"(--[a-z0-9-]+):", dark_block))
+
+    forced = css[css.index(':root[data-theme="light"] {'):]
+    forced = forced[: forced.index("\n  }")]
+    light = set(re.findall(r"(--[a-z0-9-]+):", forced))
+
+    # Fonts and the chart steps are deliberately shared across both themes:
+    # the four chart hues were validated against a light and a dark surface.
+    shared = {"--mono", "--sans", "--chart-1", "--chart-2", "--chart-3", "--chart-4"}
+    missing = dark - light - shared
+    assert not missing, f"tokens with no light value: {sorted(missing)}"
+
+
+def test_no_rule_hardcodes_a_surface_colour():
+    """Colours in rules must come from tokens, or the theme cannot move them."""
+    import re
+
+    css = _css(dashboard._read_page())
+    body = css[css.index("  * { margin: 0"):]
+    # Comments explain choices and name colours while doing so; only rules count.
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    offenders = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--"):
+            continue
+        for literal in re.findall(r"#[0-9a-fA-F]{6}\b", line):
+            offenders.append((literal, stripped[:70]))
+
+    # The brand mark is a fixed logo, not a themed surface.
+    allowed = {"#2fbf82", "#17795a", "#04140d"}
+    real = [o for o in offenders if o[0] not in allowed]
+    assert not real, f"hardcoded colours in rules: {real}"
+
+
+def test_all_three_theme_states_are_expressed():
+    """System default, forced light, forced dark — each needs its own rule."""
+    css = _css(dashboard._read_page())
+    assert ':root[data-theme="light"]' in css, "no forced-light palette"
+    assert "prefers-color-scheme: light" in css, "system light is not handled"
+    assert ':root:not([data-theme="dark"])' in css, "forced dark cannot beat a light OS"
+    assert 'html[data-theme="light"] { color-scheme: light; }' in css
+
+
+def test_keyboard_shortcuts_do_not_fire_while_typing():
+    """A shortcut that fires mid-sentence in the review editor is a bug."""
+    html = dashboard._read_page()
+    assert "function isTyping" in html
+    assert "if (isTyping(document.activeElement)) return;" in html
+
+
+def test_the_page_carries_its_own_favicon():
+    """Otherwise every load logs a 404 for /favicon.ico."""
+    assert 'rel="icon"' in dashboard._read_page()
