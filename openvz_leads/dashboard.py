@@ -430,15 +430,89 @@ async def test_instantly(request: Request):
 # ── Companies ──
 
 
+# ── Browsing lists ──
+
+# Ceiling on one page. High enough that scrolling still beats paging for a
+# normal working set, low enough that a 40,000-row database cannot hand the
+# browser a payload it will choke on rendering.
+PAGE_MAX = 200
+
+
+def _page_args(request: Request, sortable: dict[str, str], default_sort: str) -> dict:
+    """Read the shared list query string: q, sort, order, limit, offset.
+
+    `sortable` maps the name a client may send to the SQL fragment it means.
+    Anything not in that map falls back to the default, so no part of an ORDER
+    BY clause is ever built from user input.
+    """
+    params = request.query_params
+    sort = params.get("sort") or ""
+    order = "ASC" if (params.get("order") or "").lower() == "asc" else "DESC"
+
+    def _int(name: str, fallback: int, cap: int) -> int:
+        try:
+            value = int(params.get(name) or fallback)
+        except (TypeError, ValueError):
+            return fallback
+        return max(0, min(value, cap))
+
+    return {
+        "q": (params.get("q") or "").strip(),
+        "sort": sortable.get(sort, sortable[default_sort]),
+        "order": order,
+        "limit": _int("limit", 50, PAGE_MAX) or 50,
+        "offset": _int("offset", 0, 1_000_000),
+    }
+
+
+def _like(term: str) -> str:
+    """A LIKE pattern that treats the wildcards as literal text.
+
+    Someone searching for a literal % — an email with one in it, a company
+    called "100%" — should not silently match everything.
+    """
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+COMPANY_SORTS = {
+    "created_at": "c.created_at",
+    "name": "c.name",
+    "contacts": "contact_count",
+    "industry": "c.industry",
+}
+
+
 @app.get("/api/companies")
-async def get_companies():
-    """All companies with contact counts."""
-    rows = await query_db("""
-        SELECT c.*,
-            (SELECT COUNT(*) FROM prospects p WHERE p.company_id = c.id) as contact_count
-        FROM companies c ORDER BY c.created_at DESC LIMIT 200
-    """)
-    return rows
+async def get_companies(request: Request):
+    """One page of companies, with contact counts.
+
+    Returns an envelope rather than a bare list: without `total` the page
+    cannot tell "50 companies" from "the first 50 of 3,000", and the second
+    is the one where a search box matters.
+    """
+    args = _page_args(request, COMPANY_SORTS, "created_at")
+    where, params = "", []
+    if args["q"]:
+        where = "WHERE (c.name LIKE ? ESCAPE '\\' OR c.domain LIKE ? ESCAPE '\\' " \
+                "OR c.industry LIKE ? ESCAPE '\\' OR c.location LIKE ? ESCAPE '\\')"
+        params = [_like(args["q"])] * 4
+
+    total_rows = await query_db(f"SELECT COUNT(*) AS n FROM companies c {where}", tuple(params))
+    rows = await query_db(
+        f"""SELECT c.*,
+               (SELECT COUNT(*) FROM prospects p WHERE p.company_id = c.id) AS contact_count
+            FROM companies c {where}
+            ORDER BY {args["sort"]} {args["order"]}
+            LIMIT ? OFFSET ?""",
+        tuple(params) + (args["limit"], args["offset"]),
+    )
+    return {
+        "rows": rows,
+        "total": total_rows[0]["n"] if total_rows else 0,
+        "limit": args["limit"],
+        "offset": args["offset"],
+    }
 
 
 @app.get("/api/companies/{company_id}/contacts")
@@ -649,10 +723,50 @@ async def get_stats():
         return {"error": str(e)}
 
 
+PROSPECT_SORTS = {
+    "created_at": "created_at",
+    "score": "score",
+    "name": "last_name",
+    "company": "company",
+    "status": "status",
+    "title": "title",
+}
+
+
 @app.get("/api/prospects")
-async def get_prospects():
-    rows = await query_db("SELECT * FROM prospects ORDER BY created_at DESC LIMIT 200")
-    return rows
+async def get_prospects(request: Request):
+    """One page of contacts, filtered and sorted."""
+    args = _page_args(request, PROSPECT_SORTS, "created_at")
+    clauses, params = [], []
+    if args["q"]:
+        clauses.append(
+            "(first_name LIKE ? ESCAPE '\\' OR last_name LIKE ? ESCAPE '\\' "
+            "OR email LIKE ? ESCAPE '\\' OR company LIKE ? ESCAPE '\\' "
+            "OR title LIKE ? ESCAPE '\\')"
+        )
+        params += [_like(args["q"])] * 5
+
+    status = (request.query_params.get("status") or "").strip()
+    # Only a stage the pipeline actually defines, so a hand-edited URL cannot
+    # quietly return an empty page that looks like "no contacts".
+    if status and status in pipeline.STAGES:
+        clauses.append("status = ?")
+        params.append(status)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    total_rows = await query_db(f"SELECT COUNT(*) AS n FROM prospects {where}", tuple(params))
+    rows = await query_db(
+        f"""SELECT * FROM prospects {where}
+            ORDER BY {args["sort"]} {args["order"]}
+            LIMIT ? OFFSET ?""",
+        tuple(params) + (args["limit"], args["offset"]),
+    )
+    return {
+        "rows": rows,
+        "total": total_rows[0]["n"] if total_rows else 0,
+        "limit": args["limit"],
+        "offset": args["offset"],
+    }
 
 
 @app.get("/api/campaigns")

@@ -87,3 +87,20 @@ def test_getting_started_does_not_open_with_an_api_key():
             continue
         first_step = line.split("1.", 1)[1][:80]
         assert "Instantly" not in first_step, f"step one still wants a key: {first_step!r}"
+
+
+def test_every_pipeline_status_has_a_badge_style():
+    """A status with no rule renders as bare text beside styled neighbours."""
+    from openvz_leads import pipeline
+
+    html = dashboard._read_page()
+    for stage in pipeline.STAGES:
+        assert f".badge-{stage}" in html, f"no badge style for stage {stage!r}"
+
+
+def test_every_campaign_status_has_a_badge_style():
+    html = dashboard._read_page()
+    for status in (
+        "draft", "pending_review", "approved", "rejected", "active", "failed",
+    ):
+        assert f".badge-{status}" in html, f"no badge style for campaign status {status!r}"

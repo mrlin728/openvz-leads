@@ -529,6 +529,19 @@
   .badge-closed { background: rgba(255,255,255,0.04); color: var(--text-3); border-color: var(--border); }
   .badge-lost, .badge-not_interested { background: rgba(224,108,117,0.1); color: var(--red); border-color: rgba(224,108,117,0.22); }
   .badge-unknown { background: rgba(255,255,255,0.04); color: var(--text-3); border-color: var(--border); }
+  /* Every status the pipeline and the campaign lifecycle can produce. A value
+     with no rule here falls through to the bare .badge and reads as plain
+     text next to styled neighbours — which is how `won`, the one status
+     nobody should have to hunt for, was rendering. */
+  .badge-queued { background: rgba(255,255,255,0.05); color: var(--text-2); border-color: var(--border-strong); }
+  .badge-won { background: rgba(62,207,142,0.18); color: var(--accent); border-color: rgba(62,207,142,0.45); font-weight: 700; }
+  .badge-opted_out, .badge-unsubscribe { background: rgba(224,108,117,0.12); color: var(--red); border-color: rgba(224,108,117,0.3); }
+  .badge-pending_review { background: rgba(229,181,103,0.12); color: var(--amber); border-color: rgba(229,181,103,0.3); }
+  .badge-approved { background: var(--accent-soft); color: var(--accent); border-color: rgba(62,207,142,0.25); }
+  .badge-rejected, .badge-failed, .badge-escalate { background: rgba(224,108,117,0.1); color: var(--red); border-color: rgba(224,108,117,0.22); }
+  .badge-completed, .badge-sent { background: rgba(255,255,255,0.05); color: var(--text-2); border-color: var(--border-strong); }
+  .badge-question { background: rgba(116,168,255,0.1); color: var(--blue); border-color: rgba(116,168,255,0.22); }
+  .badge-cancelled, .badge-scheduled { background: rgba(255,255,255,0.04); color: var(--text-3); border-color: var(--border); }
 
   .campaign-card, .convo-card {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
@@ -706,6 +719,50 @@
     .funnel-drop { padding-left: 112px; }
   }
 
+  /* ── List toolbar & pager ── */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin-bottom: 14px;
+  }
+  .search-input {
+    flex: 1 1 260px; min-width: 180px;
+    background: var(--panel-raised); border: 1px solid var(--border);
+    border-radius: 9px; padding: 9px 13px; color: var(--text);
+    font-family: inherit; font-size: 13px;
+  }
+  .search-input:focus {
+    outline: none; border-color: var(--accent-deep);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .search-input::placeholder { color: var(--text-3); }
+  .select-input {
+    background: var(--panel-raised); border: 1px solid var(--border);
+    border-radius: 9px; padding: 9px 11px; color: var(--text-2);
+    font-family: inherit; font-size: 13px; cursor: pointer;
+  }
+  .select-input:focus { outline: none; border-color: var(--border-strong); }
+  .result-count {
+    font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums;
+    margin-left: auto; white-space: nowrap;
+  }
+  .pager {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    margin-top: 16px; font-size: 12.5px; color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .pager:empty { display: none; }
+  .pager button {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text-2);
+    padding: 7px 15px; border-radius: 99px; cursor: pointer;
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+  }
+  .pager button:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+  .pager button:disabled { opacity: 0.4; cursor: default; }
+
+  @media (max-width: 640px) {
+    .result-count { margin-left: 0; width: 100%; }
+  }
+
 </style>
 </head>
 <body>
@@ -810,13 +867,45 @@
 <!-- Companies -->
 <div id="companies" class="section">
   <div class="section-head"><h2 data-i18n="companies.title">Companies</h2><p data-i18n="companies.sub">Organizations OpenVZ Leads has researched. Click a row to see its contacts.</p></div>
+  <!-- The toolbar lives outside the region the 15-second refresh redraws.
+       Re-rendering it would blur the search box mid-word. -->
+  <div class="toolbar" id="companies-toolbar">
+    <input type="search" class="search-input" id="companies-q"
+           data-i18n-placeholder="list.searchCompanies"
+           placeholder="Search name, domain, industry, location" autocomplete="off">
+    <select class="select-input" id="companies-sort">
+      <option value="created_at" data-i18n="list.sort.newest">Newest first</option>
+      <option value="name" data-i18n="list.sort.name">Name</option>
+      <option value="contacts" data-i18n="list.sort.contacts">Most contacts</option>
+      <option value="industry" data-i18n="list.sort.industry">Industry</option>
+    </select>
+    <span class="result-count" id="companies-count"></span>
+  </div>
   <div id="companies-list"></div>
+  <div class="pager" id="companies-pager"></div>
 </div>
 
 <!-- Contacts -->
 <div id="prospects" class="section">
   <div class="section-head"><h2 data-i18n="contacts.title">Contacts</h2><p data-i18n="contacts.sub">People OpenVZ Leads has found and verified.</p></div>
+  <div class="toolbar" id="prospects-toolbar">
+    <input type="search" class="search-input" id="prospects-q"
+           data-i18n-placeholder="list.searchContacts"
+           placeholder="Search name, email, company, title" autocomplete="off">
+    <select class="select-input" id="prospects-status">
+      <option value="" data-i18n="list.allStages">Every stage</option>
+    </select>
+    <select class="select-input" id="prospects-sort">
+      <option value="created_at" data-i18n="list.sort.newest">Newest first</option>
+      <option value="score" data-i18n="list.sort.score">Score</option>
+      <option value="name" data-i18n="list.sort.surname">Surname</option>
+      <option value="company" data-i18n="list.sort.company">Company</option>
+      <option value="status" data-i18n="list.sort.stage">Stage</option>
+    </select>
+    <span class="result-count" id="prospects-count"></span>
+  </div>
   <div id="prospects-table"></div>
+  <div class="pager" id="prospects-pager"></div>
 </div>
 
 <!-- Account briefs -->
@@ -1160,6 +1249,24 @@ const I18N = {
     'nav.activity': '动态', 'nav.settings': '设置', 'nav.controls': '控制台',
     'nav.help': '帮助',
     'nav.insights': '洞察',
+    'list.searchContacts': '搜姓名、邮箱、公司、职位',
+    'list.searchCompanies': '搜名称、域名、行业、地区',
+    'list.allStages': '所有阶段',
+    'list.sort.newest': '最新在前',
+    'list.sort.score': '按评分',
+    'list.sort.surname': '按姓氏',
+    'list.sort.company': '按公司',
+    'list.sort.stage': '按阶段',
+    'list.sort.name': '按名称',
+    'list.sort.contacts': '联系人最多',
+    'list.sort.industry': '按行业',
+    'list.count': '共 {total} 条',
+    'list.countRange': '第 {from}–{to} 条，共 {total} 条',
+    'list.page': '第 {page} / {pages} 页',
+    'list.prev': '上一页',
+    'list.next': '下一页',
+    'list.noMatch': '没有匹配的结果',
+    'list.noMatchCopy': '没有东西匹配「{q}」。换个词，或者清空搜索框看全部。',
     'insights.title': '洞察',
     'insights.sub': '数字说明了什么，以及分析师认为你该怎么办。比率是实时算的；文字建议来自上一次分析。',
     'insights.replyRate': '回复率',
@@ -1495,6 +1602,24 @@ const I18N = {
     'nav.activity': 'Activity', 'nav.settings': 'Settings', 'nav.controls': 'Controls',
     'nav.help': 'Help',
     'nav.insights': 'Insights',
+    'list.searchContacts': 'Search name, email, company, title',
+    'list.searchCompanies': 'Search name, domain, industry, location',
+    'list.allStages': 'Every stage',
+    'list.sort.newest': 'Newest first',
+    'list.sort.score': 'Score',
+    'list.sort.surname': 'Surname',
+    'list.sort.company': 'Company',
+    'list.sort.stage': 'Stage',
+    'list.sort.name': 'Name',
+    'list.sort.contacts': 'Most contacts',
+    'list.sort.industry': 'Industry',
+    'list.count': '{total} total',
+    'list.countRange': '{from}–{to} of {total}',
+    'list.page': 'Page {page} of {pages}',
+    'list.prev': 'Previous',
+    'list.next': 'Next',
+    'list.noMatch': 'Nothing matched',
+    'list.noMatchCopy': 'Nothing here matches “{q}”. Try a different word, or clear the box to see everything.',
     'insights.title': 'Insights',
     'insights.sub': 'What the numbers say, and what the Analyst thinks you should do about it. Rates are computed live; the written notes come from the last analysis pass.',
     'insights.replyRate': 'Reply rate',
@@ -1788,6 +1913,7 @@ function toggleLang() {
   LANG = LANG === 'zh' ? 'en' : 'zh';
   try { localStorage.setItem('ovzLeadsLang', LANG); } catch {}
   applyLang();
+  fillStageFilter();
   loadCurrentTab();
 }
 
@@ -2863,14 +2989,128 @@ async function loadInsights() {
     insightsSpend(data.usage);
 }
 
+// ── Browsing lists: search, filter, sort, page ──
+
+// Query state per list, kept out of the DOM so the 15-second refresh can
+// re-fetch the current page without reading half-typed values back out of
+// the inputs.
+const LIST_STATE = {
+  prospects: {q: '', status: '', sort: 'created_at', order: 'desc', offset: 0, limit: 50, total: 0},
+  companies: {q: '', sort: 'created_at', order: 'desc', offset: 0, limit: 50, total: 0},
+};
+
+// Name ascends; everything else descends. Sorting surnames Z-to-A because
+// the previous sort happened to be "newest first" is the kind of default
+// that makes a list feel broken.
+const ASCENDING_SORTS = ['name', 'company', 'industry', 'status', 'title'];
+
+function listQuery(name) {
+  const st = LIST_STATE[name];
+  const parts = ['limit=' + st.limit, 'offset=' + st.offset,
+                 'sort=' + encodeURIComponent(st.sort), 'order=' + st.order];
+  if (st.q) parts.push('q=' + encodeURIComponent(st.q));
+  if (st.status) parts.push('status=' + encodeURIComponent(st.status));
+  return '?' + parts.join('&');
+}
+
+function renderCount(name) {
+  const st = LIST_STATE[name];
+  const el = document.getElementById(name + '-count');
+  if (!el) return;
+  const shown = Math.min(st.limit, Math.max(0, st.total - st.offset));
+  el.textContent = st.total === 0
+    ? ''
+    : (st.total <= st.limit && st.offset === 0
+        ? tf('list.count', {total: st.total})
+        : tf('list.countRange', {
+            from: st.offset + 1, to: st.offset + shown, total: st.total}));
+}
+
+function renderPager(name, reload) {
+  const st = LIST_STATE[name];
+  const el = document.getElementById(name + '-pager');
+  if (!el) return;
+  if (st.total <= st.limit) { el.innerHTML = ''; return; }
+  const page = Math.floor(st.offset / st.limit) + 1;
+  const pages = Math.max(1, Math.ceil(st.total / st.limit));
+  el.innerHTML =
+    '<button ' + (st.offset <= 0 ? 'disabled' : '') + ' onclick="pageList(\'' + name + '\', -1)">' +
+      escHtml(t('list.prev')) + '</button>' +
+    '<span>' + escHtml(tf('list.page', {page: page, pages: pages})) + '</span>' +
+    '<button ' + (st.offset + st.limit >= st.total ? 'disabled' : '') +
+      ' onclick="pageList(\'' + name + '\', 1)">' + escHtml(t('list.next')) + '</button>';
+}
+
+function pageList(name, direction) {
+  const st = LIST_STATE[name];
+  st.offset = Math.max(0, st.offset + direction * st.limit);
+  (name === 'prospects' ? loadProspects : loadCompanies)();
+  // Paging without this leaves you looking at the bottom of a fresh page.
+  document.getElementById(name).scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+// Typing a name fires one request when you stop, not one per keystroke.
+function debounce(fn, ms) {
+  let timer = null;
+  return function () {
+    clearTimeout(timer);
+    timer = setTimeout(fn, ms);
+  };
+}
+
+function bindListControls(name, reload) {
+  const st = LIST_STATE[name];
+  const search = document.getElementById(name + '-q');
+  if (search) {
+    const run = debounce(() => { st.q = search.value.trim(); st.offset = 0; reload(); }, 250);
+    search.addEventListener('input', run);
+  }
+  const sort = document.getElementById(name + '-sort');
+  if (sort) {
+    sort.addEventListener('change', () => {
+      st.sort = sort.value;
+      st.order = ASCENDING_SORTS.includes(st.sort) ? 'asc' : 'desc';
+      st.offset = 0;
+      reload();
+    });
+  }
+  const status = document.getElementById(name + '-status');
+  if (status) {
+    status.addEventListener('change', () => { st.status = status.value; st.offset = 0; reload(); });
+  }
+}
+
+// The stage filter's options come from the pipeline vocabulary the rest of
+// the page already translates, so a new stage never needs adding twice.
+const FILTERABLE_STAGES = ['new', 'queued', 'contacted', 'replied', 'meeting', 'won', 'lost', 'opted_out'];
+
+function fillStageFilter() {
+  const el = document.getElementById('prospects-status');
+  if (!el) return;
+  const chosen = el.value;
+  el.innerHTML = '<option value="">' + escHtml(t('list.allStages')) + '</option>' +
+    FILTERABLE_STAGES.map(st =>
+      '<option value="' + st + '">' + escHtml(t('stage.' + st)) + '</option>').join('');
+  el.value = chosen;
+}
+
 async function loadCompanies() {
   companyDrill = false;
   const el = document.getElementById('companies-list');
-  const data = await api('/api/companies');
-  if (!data) { el.innerHTML = offlineState(); return; }
+  const body = await api('/api/companies' + listQuery('companies'));
+  if (!body) { el.innerHTML = offlineState(); return; }
+  const data = body.rows || [];
   _companies = data;
+  LIST_STATE.companies.total = body.total || 0;
+  renderCount('companies');
+  renderPager('companies');
   if (!data.length) {
-    el.innerHTML = emptyState('&#9906;', t('companies.empty'), t('companies.emptyCopy'));
+    // A search that matched nothing is not an empty install, and telling
+    // someone to go start the agent when they simply mistyped a name is a
+    // dead end.
+    el.innerHTML = LIST_STATE.companies.q
+      ? emptyState('&#9906;', t('list.noMatch'), tf('list.noMatchCopy', {q: LIST_STATE.companies.q}))
+      : emptyState('&#9906;', t('companies.empty'), t('companies.emptyCopy'));
     return;
   }
   const companyCols = ['name', 'domain', 'industry', 'size', 'location', 'contacts', 'source', 'added'];
@@ -2945,11 +3185,19 @@ function fbCampaign(i) {
 
 async function loadProspects() {
   const el = document.getElementById('prospects-table');
-  const data = await api('/api/prospects');
-  if (!data) { el.innerHTML = offlineState(); return; }
+  const body = await api('/api/prospects' + listQuery('prospects'));
+  if (!body) { el.innerHTML = offlineState(); return; }
+  const data = body.rows || [];
   _prospects = data;
+  LIST_STATE.prospects.total = body.total || 0;
+  renderCount('prospects');
+  renderPager('prospects');
   if (!data.length) {
-    el.innerHTML = emptyState('&#9673;', t('contacts.empty'), t('contacts.emptyCopy'));
+    const st = LIST_STATE.prospects;
+    el.innerHTML = (st.q || st.status)
+      ? emptyState('&#9673;', t('list.noMatch'),
+          tf('list.noMatchCopy', {q: st.q || t('stage.' + st.status)}))
+      : emptyState('&#9673;', t('contacts.empty'), t('contacts.emptyCopy'));
     return;
   }
   const contactCols = ['name', 'title', 'company', 'email', 'phone', 'status', 'source', 'added'];
@@ -3057,6 +3305,9 @@ async function refreshReviewBadge() {
 }
 
 applyLang();
+fillStageFilter();
+bindListControls('prospects', loadProspects);
+bindListControls('companies', loadCompanies);
 loadSetupStatus();
 loadAgentStatus();
 refreshReviewBadge();
