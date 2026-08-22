@@ -56,3 +56,34 @@ def test_every_tab_button_has_a_matching_section():
     assert tabs, "no tabs found in the nav"
     for tab in tabs:
         assert f'<div id="{tab}" class="section' in html, f"no section for tab {tab!r}"
+
+
+def test_no_tab_calls_a_sending_provider_required():
+    """Sending is opt-in. The UI must never say otherwise.
+
+    The whole pipeline — find, analyse, draft, export — runs with no provider
+    and no keys. Copy that labels Instantly "required" tells a new user they
+    are 0% set up while holding a working install, and sends them off to buy
+    a Growth plan before they have seen a single draft.
+    """
+    html = dashboard._read_page()
+    for phrase in (
+        "Instantly API Key (required)",
+        "Instantly API 密钥（必填）",
+    ):
+        assert phrase not in html, f"UI still calls Instantly required: {phrase!r}"
+
+    # The Instantly lede sits next to the key input in Settings; it opened
+    # with a bare "Required." / "必填。" before this was fixed.
+    for opener in ("'settings.instantlyLede': 'Required.", "'settings.instantlyLede': '必填。"):
+        assert opener not in html
+
+
+def test_getting_started_does_not_open_with_an_api_key():
+    """Step one is teaching it the product, not buying a sending plan."""
+    html = dashboard._read_page()
+    for line in html.splitlines():
+        if "help.startSteps" not in line:
+            continue
+        first_step = line.split("1.", 1)[1][:80]
+        assert "Instantly" not in first_step, f"step one still wants a key: {first_step!r}"

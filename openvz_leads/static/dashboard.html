@@ -749,8 +749,8 @@
 <div id="settings" class="section">
   <div class="section-head"><h2 data-i18n="settings.title">Settings</h2><p data-i18n-html="settings.sub">Credentials are stored locally in <span style="font-family:var(--mono);font-size:12px">.env</span> — never sent anywhere except the services themselves.</p></div>
   <div class="card">
-    <h2 data-i18n="settings.instantlyTitle">Instantly (Email Platform)</h2>
-    <p class="lede" data-i18n-html="settings.instantlyLede">Required. Get your API key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a>.</p>
+    <h2><span data-i18n="settings.instantlyTitle">Instantly (Email Platform)</span> <span class="optional-tag" data-i18n="settings.optional">optional</span></h2>
+    <p class="lede" data-i18n-html="settings.instantlyLede">One of two ways to send, and neither is needed to get value: with no provider at all the outreach is still found, analysed, drafted and queued for your review — you take it from the Export tab. Key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a> (API access is on their Growth plan).</p>
     <div class="form-group">
       <label class="form-label" for="instantly-key" data-i18n="settings.apiKey">API Key</label>
       <div class="form-row">
@@ -850,8 +850,8 @@
   <div class="help-section">
     <h2 data-i18n="help.startTitle">Getting Started</h2>
     <p data-i18n="help.startBody">There are three things to do:</p>
-    <pre data-i18n="help.startSteps">1. Go to the Settings tab and enter your Instantly API key
-2. Train OpenVZ Leads on your product (through Claude or the command line)
+    <pre data-i18n="help.startSteps">1. Teach it your product — `openvz-leads train &lt;your-url&gt;`, or ask Claude
+2. Say who you are after — the Target tab, or `openvz-leads target "..."`
 3. Go to the Controls tab and click Start</pre>
     <p data-i18n="help.startNote">The Setup tab shows you exactly what's done and what still needs to happen.</p>
   </div>
@@ -876,10 +876,11 @@
     <h2 data-i18n="help.keysTitle">Getting Your API Keys</h2>
 
     <details>
-      <summary data-i18n="help.instantlySummary">Instantly API Key (required)</summary>
+      <summary data-i18n="help.instantlySummary">Instantly API Key (optional)</summary>
       <div class="faq-body" data-i18n-html="help.instantlyBody">
-        <p>Instantly is the email platform OpenVZ Leads uses to send campaigns.</p>
-        <p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (you need the Growth plan for API access)</p>
+        <p>Instantly is one of the two ways OpenVZ Leads can send &mdash; the other is your own Gmail. You need neither to start: with no provider configured the whole pipeline runs, the drafts land in the review queue, and you take them out from the Export tab.</p>
+        <p>If you do want it to send through Instantly:</p>
+        <p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (API access is on their Growth plan)</p>
         <p>2. Go to Settings &gt; Integrations</p>
         <p>3. Copy your API key</p>
         <p>4. Paste it in the Settings tab here</p>
@@ -1104,7 +1105,7 @@ const I18N = {
     'setup.check.instantly.help': '只有想让它替你发信才需要。不配也一样：开发信照写、进审核队列、从「导出」拿走。人工审核这一环两种情况下都在。',
     // ── 设置页 ──
     'settings.instantlyTitle': 'Instantly（发信平台）',
-    'settings.instantlyLede': '必填。在 <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly 设置 &gt; Integrations</a> 里拿 API 密钥。',
+    'settings.instantlyLede': '两条发信路径之一，而且两条都不是必须的：一个通道都不配，它照样找人、分析、写开发信、进审核队列，你从「导出」拿走就行。密钥在 <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly 设置 &gt; Integrations</a>（API 权限要 Growth 套餐）。',
     'settings.apiKey': 'API 密钥',
     'settings.instantlyPlaceholder': '填入你的 Instantly API 密钥',
     'settings.show': '显示',
@@ -1216,7 +1217,7 @@ const I18N = {
     'help.whatBody2': 'OpenVZ Leads 跑在你的 Claude Max 订阅上，没有额外的模型费用。所有东西都留在你自己的机器上，就在一个文件夹里。',
     'help.startTitle': '怎么开始',
     'help.startBody': '一共三件事：',
-    'help.startSteps': '1. 到「设置」标签页填上你的 Instantly API 密钥\n2. 让 OpenVZ Leads 学习你的产品（通过 Claude 或命令行）\n3. 到「控制台」标签页点启动',
+    'help.startSteps': '1. 先让它认识你的产品 —— `openvz-leads train <你的网址>`，或者直接问 Claude\n2. 说清楚你要找谁 —— 「目标」标签页，或者 `openvz-leads target "..."`\n3. 到「控制台」标签页点启动',
     'help.startNote': '「配置」标签页会明确告诉你哪些做完了、还差什么。',
     'help.whereTitle': '东西都在哪',
     'help.whereBody': 'OpenVZ Leads 需要的一切都在这一个项目文件夹里，不会存到别处。',
@@ -1228,8 +1229,8 @@ const I18N = {
     'help.file.db': '数据库，装着全部联系人、活动和对话',
     'help.file.log': '日志文件，看它此刻在做什么',
     'help.keysTitle': '怎么拿到这些密钥',
-    'help.instantlySummary': 'Instantly API 密钥（必填）',
-    'help.instantlyBody': '<p>Instantly 是 OpenVZ Leads 用来发送活动的邮件平台。</p><p>1. 到 <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> 注册（要 Growth 套餐才有 API 权限）</p><p>2. 进 Settings &gt; Integrations</p><p>3. 复制 API 密钥</p><p>4. 粘贴到这里的「设置」标签页</p>',
+    'help.instantlySummary': 'Instantly API 密钥（可选）',
+    'help.instantlyBody': '<p>Instantly 是 OpenVZ Leads 两条发信路径之一，另一条是用你自己的 Gmail。刚开始两条都不用配：一个通道都没有的时候，整条流水线照跑，开发信进审核队列，你从「导出」标签页拿走。</p><p>如果确实想让它走 Instantly 发：</p><p>1. 到 <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> 注册（API 权限要 Growth 套餐）</p><p>2. 进 Settings &gt; Integrations</p><p>3. 复制 API 密钥</p><p>4. 粘贴到这里的「设置」标签页</p>',
     'help.linkedinSummary': 'LinkedIn 账号（可选）',
     'help.linkedinBody': '<p>如果你想让 OpenVZ Leads 去 LinkedIn 上找人，就填上你的 LinkedIn 邮箱和密码。它用真实浏览器像真人那样搜索，带随机延时和频率限制，避免被识别。</p><p>不填也行，它会改用 Google 搜索和公司官网抓取来找人。</p>',
     'help.cloudflareSummary': 'Cloudflare 浏览器渲染（可选）',
@@ -1399,7 +1400,7 @@ const I18N = {
     'setup.check.instantly.help': 'Only needed if you want it to send for you. Without it, outreach is drafted, queued for your review, and exported from the Export tab. Human review stays on either way.',
     // ── Settings ──
     'settings.instantlyTitle': 'Instantly (Email Platform)',
-    'settings.instantlyLede': 'Required. Get your API key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a>.',
+    'settings.instantlyLede': 'One of two ways to send, and neither is needed to get value: with no provider at all the outreach is still found, analysed, drafted and queued for your review — you take it from the Export tab. Key from <a href="https://app.instantly.ai/app/settings/integrations" target="_blank" rel="noopener">Instantly Settings &gt; Integrations</a> (API access is on their Growth plan).',
     'settings.apiKey': 'API Key',
     'settings.instantlyPlaceholder': 'Enter your Instantly API key',
     'settings.show': 'Show',
@@ -1511,7 +1512,7 @@ const I18N = {
     'help.whatBody2': 'OpenVZ Leads runs on your Claude Max subscription, so there are no extra AI costs. Everything stays on your machine in one folder.',
     'help.startTitle': 'Getting Started',
     'help.startBody': 'There are three things to do:',
-    'help.startSteps': '1. Go to the Settings tab and enter your Instantly API key\n2. Train OpenVZ Leads on your product (through Claude or the command line)\n3. Go to the Controls tab and click Start',
+    'help.startSteps': '1. Teach it your product — `openvz-leads train <your-url>`, or ask Claude\n2. Say who you are after — the Target tab, or `openvz-leads target "..."`\n3. Go to the Controls tab and click Start',
     'help.startNote': "The Setup tab shows you exactly what's done and what still needs to happen.",
     'help.whereTitle': 'Where Everything Lives',
     'help.whereBody': 'Everything OpenVZ Leads needs is inside this one project folder. Nothing is stored elsewhere.',
@@ -1523,8 +1524,8 @@ const I18N = {
     'help.file.db': 'Database with all prospects, campaigns, and conversations',
     'help.file.log': 'Log file showing what OpenVZ Leads is doing',
     'help.keysTitle': 'Getting Your API Keys',
-    'help.instantlySummary': 'Instantly API Key (required)',
-    'help.instantlyBody': '<p>Instantly is the email platform OpenVZ Leads uses to send campaigns.</p><p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (you need the Growth plan for API access)</p><p>2. Go to Settings &gt; Integrations</p><p>3. Copy your API key</p><p>4. Paste it in the Settings tab here</p>',
+    'help.instantlySummary': 'Instantly API Key (optional)',
+    'help.instantlyBody': '<p>Instantly is one of the two ways OpenVZ Leads can send — the other is your own Gmail. You need neither to start: with no provider configured the whole pipeline runs, the drafts land in the review queue, and you take them out from the Export tab.</p><p>If you do want it to send through Instantly:</p><p>1. Sign up at <a href="https://instantly.ai" target="_blank" rel="noopener">instantly.ai</a> (API access is on their Growth plan)</p><p>2. Go to Settings &gt; Integrations</p><p>3. Copy your API key</p><p>4. Paste it in the Settings tab here</p>',
     'help.linkedinSummary': 'LinkedIn Credentials (optional)',
     'help.linkedinBody': '<p>If you want OpenVZ Leads to find prospects on LinkedIn, enter your LinkedIn email and password. OpenVZ Leads uses a real browser to search LinkedIn like a human would, with random delays and rate limits to avoid detection.</p><p>If you skip this, OpenVZ Leads will find prospects through Google searches and company website scraping instead.</p>',
     'help.cloudflareSummary': 'Cloudflare Browser Rendering (optional)',
