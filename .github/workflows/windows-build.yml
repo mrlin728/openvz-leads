@@ -57,6 +57,11 @@ jobs:
         shell: pwsh
         run: |
           $env:OPENVZ_LEADS_HOME = "$env:RUNNER_TEMP\ovz-smoke"
+          # No desktop session on a runner, so ask for the server without the
+          # window. Otherwise the window fails, the browser fallback fires,
+          # and the check depends on what a headless box does with a browser
+          # open request rather than on whether the app works.
+          $env:OPENVZ_LEADS_NO_WINDOW = "1"
           $exe = ".\dist\OpenVZ Leads\OpenVZ Leads.exe"
           $proc = Start-Process -FilePath $exe -PassThru
           $ok = $false

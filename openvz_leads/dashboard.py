@@ -1118,7 +1118,7 @@ async def dashboard():
 
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1222,33 +1222,103 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
   .refresh-btn:hover { border-color: var(--border-strong); color: var(--text); }
 
-  /* ── Nav ── */
-  nav {
-    position: sticky; top: 63px; z-index: 99;
-    background: rgba(8,9,12,0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid var(--border);
-    padding: 0 24px; display: flex; overflow-x: auto;
-    scrollbar-width: none;
+  .power-btn {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--accent); border: 1px solid var(--accent); color: #04140d;
+    padding: 7px 15px; border-radius: 99px; cursor: pointer;
+    font-size: 12px; font-weight: 700; font-family: inherit;
+    transition: filter .15s, background .15s, color .15s, border-color .15s;
   }
-  nav::-webkit-scrollbar { display: none; }
+  .power-btn:hover { filter: brightness(1.08); }
+  .power-btn:disabled { opacity: .55; cursor: default; filter: none; }
+  .power-btn svg { width: 14px; height: 14px; }
+  /* Running: stopping is the available action, and it should not wear the
+     same inviting green as "start". */
+  .power-btn.on {
+    background: transparent; color: var(--text-2); border-color: var(--border-strong);
+  }
+  .power-btn.on:hover { color: var(--red); border-color: var(--red); }
+
+  /* ── Shell: sidebar beside content ──
+     Fourteen destinations in one flat row gave no clue which came first or
+     which belonged together. Down the side they can be grouped, and the
+     grouping is what carries the order of the work. */
+  .shell { display: flex; align-items: flex-start; }
+
+  nav {
+    position: sticky; top: 63px; z-index: 90;
+    flex: 0 0 214px; width: 214px;
+    height: calc(100vh - 63px); overflow-y: auto;
+    border-right: 1px solid var(--border);
+    padding: 6px 12px 28px;
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  nav::-webkit-scrollbar { width: 7px; }
+  nav::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  nav::-webkit-scrollbar-track { background: transparent; }
+
+  .nav-group {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px;
+    color: var(--text-3); font-weight: 700;
+    padding: 18px 10px 7px; user-select: none;
+  }
+  .nav-group:first-child { padding-top: 10px; }
 
   nav button {
-    position: relative;
-    background: none; border: none;
-    color: var(--text-3); padding: 13px 14px; cursor: pointer;
+    position: relative; width: 100%;
+    display: flex; align-items: center; gap: 10px;
+    background: none; border: none; border-radius: 8px;
+    color: var(--text-2); padding: 8px 10px; cursor: pointer;
     font-size: 13px; font-weight: 500; font-family: inherit;
-    transition: color .15s; white-space: nowrap;
+    text-align: left; transition: background .13s, color .13s;
   }
-  nav button:hover { color: var(--text-2); }
-  nav button.active { color: var(--text); font-weight: 600; }
-  nav button.active::after {
-    content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px;
-    height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+  nav button:hover { background: var(--panel-raised); color: var(--text); }
+  nav button.active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+  nav button svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .8; }
+  nav button.active svg { opacity: 1; }
+  nav button .nav-label { flex: 1 1 auto; min-width: 0; }
+
+  main {
+    flex: 1 1 auto; min-width: 0;
+    padding: 26px 32px 64px; max-width: 1180px;
   }
 
-  main { padding: 28px 32px 64px; max-width: 1400px; margin: 0 auto; }
+  /* ── Next step ──
+     The one thing on screen that answers "so what do I do now?". It reads the
+     same setup, review and agent state the tabs do, and points at whichever
+     is the actual blocker — so the answer is never "go and find out". */
+  .nextstep {
+    display: flex; align-items: center; gap: 16px;
+    padding: 15px 18px; margin-bottom: 22px;
+    background: linear-gradient(90deg, var(--accent-soft), rgba(62,207,142,0.03));
+    border: 1px solid rgba(62,207,142,0.22);
+    border-radius: 12px;
+  }
+  .nextstep.wait {
+    background: linear-gradient(90deg, rgba(229,181,103,0.10), rgba(229,181,103,0.02));
+    border-color: rgba(229,181,103,0.24);
+  }
+  .nextstep.calm {
+    background: var(--panel); border-color: var(--border);
+  }
+  .ns-mark {
+    width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(62,207,142,0.16); color: var(--accent);
+  }
+  .nextstep.wait .ns-mark { background: rgba(229,181,103,0.16); color: var(--amber); }
+  .nextstep.calm .ns-mark { background: var(--panel-raised); color: var(--text-3); }
+  .ns-mark svg { width: 16px; height: 16px; }
+  .ns-body { flex: 1 1 auto; min-width: 0; }
+  .ns-title { font-size: 14px; font-weight: 650; color: var(--text); }
+  /* Some setup help runs long. Two lines keeps the banner a banner; the full
+     text is on the Setup tab the button leads to. */
+  .ns-copy {
+    font-size: 12.5px; color: var(--text-2); margin-top: 3px; line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ns-act { flex-shrink: 0; }
 
   .section { display: none; }
   .section.active { display: block; animation: rise .25s ease; }
@@ -1500,9 +1570,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .nav-count {
     display: none; margin-left: 6px; padding: 1px 7px; border-radius: 99px;
     background: var(--amber); color: #241a05; font-size: 10.5px; font-weight: 800;
-    vertical-align: middle;
+    vertical-align: middle; flex-shrink: 0;
   }
   .nav-count.on { display: inline-block; }
+  /* Setup is the only count that means "unfinished" rather than "waiting on
+     you", so it reads as a quiet marker instead of an alert. */
+  .nav-count.todo { background: var(--border-strong); color: var(--text); }
 
   .review-card, .brief-card {
     background: var(--panel); border: 1px solid var(--border);
@@ -1703,14 +1776,58 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .empty .copy { font-size: 13px; color: var(--text-3); line-height: 1.6; max-width: 420px; margin: 0 auto; }
   .empty .copy b { color: var(--text-2); font-weight: 600; }
 
+  /* Narrow window: the sidebar keeps its groups but drops to icons, so the
+     content area does not get squeezed into a column. The label is still
+     announced to screen readers — it is hidden visually, not removed. */
+  @media (max-width: 900px) {
+    nav { flex: 0 0 56px; width: 56px; padding: 6px 8px 28px; align-items: center; }
+    nav button { justify-content: center; padding: 9px 0; }
+    nav button .nav-label {
+      position: absolute; width: 1px; height: 1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    }
+    nav button .nav-count { margin-left: 0; position: absolute; top: 2px; right: 4px; }
+    .nav-group {
+      width: 100%; padding: 14px 0 6px; text-align: center;
+      font-size: 0; /* the label cannot fit; the rule below keeps the divider */
+    }
+    .nav-group::after {
+      content: ""; display: block; height: 1px; background: var(--border);
+      margin: 0 6px;
+    }
+    main { padding-left: 20px; padding-right: 20px; }
+  }
+
   @media (max-width: 700px) {
-    header, main { padding-left: 18px; padding-right: 18px; }
-    nav { padding: 0 10px; }
+    header { padding-left: 18px; padding-right: 18px; }
     .brand .tagline { display: none; }
+    .nextstep { flex-wrap: wrap; }
+    .ns-act { width: 100%; }
   }
 </style>
 </head>
 <body>
+
+<!-- Icons, defined once and referenced by <use>. Stroked with currentColor so
+     a nav item's active colour carries into its icon for free. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<g id="i-setup"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></g>
+<g id="i-target"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></g>
+<g id="i-overview"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></g>
+<g id="i-companies"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M14 9h4a2 2 0 0 1 2 2v10"/><path d="M2 21h20M8 7h2M8 11h2M8 15h2"/></g>
+<g id="i-contacts"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></g>
+<g id="i-briefs"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></g>
+<g id="i-review"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></g>
+<g id="i-campaigns"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></g>
+<g id="i-conversations"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></g>
+<g id="i-export"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></g>
+<g id="i-activity"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></g>
+<g id="i-settings"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></g>
+<g id="i-controls"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><path d="M12 2v10"/></g>
+<g id="i-help"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></g>
+<g id="i-arrow"><path d="M5 12h14M12 5l7 7-7 7"/></g>
+<g id="i-check"><path d="M20 6 9 17l-5-5"/></g>
+</defs></svg>
 
 <header>
   <div class="brand">
@@ -1725,31 +1842,99 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <span class="status-dot stopped" id="header-dot"></span>
       <span id="header-status-text" data-i18n="status.checking">Checking…</span>
     </div>
-    <button class="refresh-btn" onclick="toggleLang()" id="lang-btn">中文</button>
+    <!-- The on switch, always in reach. It used to live inside the Controls
+         tab, which meant navigating away from whatever you were looking at
+         to start or stop the very agent producing it. -->
+    <button class="power-btn" id="header-power" onclick="togglePower()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-controls"/></svg>
+      <span id="header-power-label" data-i18n="controls.startShort">启动</span>
+    </button>
+    <button class="refresh-btn" onclick="toggleLang()" id="lang-btn">EN</button>
     <button class="refresh-btn" onclick="loadCurrentTab()" data-i18n="btn.refresh">Refresh</button>
   </div>
 </header>
 
+<div class="shell">
+
 <nav>
-  <button class="active" onclick="showTab('setup', this)" data-i18n="nav.setup">Setup</button>
-  <button onclick="showTab('target', this)" data-i18n="nav.target">Target</button>
-  <button onclick="showTab('overview', this)" data-i18n="nav.overview">Overview</button>
-  <button onclick="showTab('companies', this)" data-i18n="nav.companies">Companies</button>
-  <button onclick="showTab('prospects', this)" data-i18n="nav.contacts">Contacts</button>
-  <button onclick="showTab('briefs', this)" data-i18n="nav.briefs">Account briefs</button>
-  <button onclick="showTab('review', this)">
-    <span data-i18n="nav.review">Review</span><span class="nav-count" id="review-count"></span>
+  <div class="nav-group" data-i18n="navgroup.start">Get started</div>
+  <button class="active" onclick="showTab('setup', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-setup"/></svg>
+    <span class="nav-label" data-i18n="nav.setup">Setup</span><span class="nav-count" id="setup-count"></span>
   </button>
-  <button onclick="showTab('campaigns', this)" data-i18n="nav.campaigns">Campaigns</button>
-  <button onclick="showTab('conversations', this)" data-i18n="nav.conversations">Conversations</button>
-  <button onclick="showTab('export', this)" data-i18n="nav.export">Export</button>
-  <button onclick="showTab('activity', this)" data-i18n="nav.activity">Activity</button>
-  <button onclick="showTab('settings', this)" data-i18n="nav.settings">Settings</button>
-  <button onclick="showTab('controls', this)" data-i18n="nav.controls">Controls</button>
-  <button onclick="showTab('help', this)" data-i18n="nav.help">Help</button>
+  <button onclick="showTab('target', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-target"/></svg>
+    <span class="nav-label" data-i18n="nav.target">Target</span>
+  </button>
+
+  <div class="nav-group" data-i18n="navgroup.run">Day to day</div>
+  <button onclick="showTab('overview', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-overview"/></svg>
+    <span class="nav-label" data-i18n="nav.overview">Overview</span>
+  </button>
+  <button onclick="showTab('review', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-review"/></svg>
+    <span class="nav-label" data-i18n="nav.review">Review</span><span class="nav-count" id="review-count"></span>
+  </button>
+  <button onclick="showTab('conversations', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-conversations"/></svg>
+    <span class="nav-label" data-i18n="nav.conversations">Conversations</span>
+  </button>
+  <button onclick="showTab('controls', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-controls"/></svg>
+    <span class="nav-label" data-i18n="nav.controls">Controls</span>
+  </button>
+
+  <div class="nav-group" data-i18n="navgroup.data">What it found</div>
+  <button onclick="showTab('companies', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-companies"/></svg>
+    <span class="nav-label" data-i18n="nav.companies">Companies</span>
+  </button>
+  <button onclick="showTab('prospects', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-contacts"/></svg>
+    <span class="nav-label" data-i18n="nav.contacts">Contacts</span>
+  </button>
+  <button onclick="showTab('briefs', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-briefs"/></svg>
+    <span class="nav-label" data-i18n="nav.briefs">Account briefs</span>
+  </button>
+  <button onclick="showTab('campaigns', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-campaigns"/></svg>
+    <span class="nav-label" data-i18n="nav.campaigns">Campaigns</span>
+  </button>
+  <button onclick="showTab('export', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-export"/></svg>
+    <span class="nav-label" data-i18n="nav.export">Export</span>
+  </button>
+
+  <div class="nav-group" data-i18n="navgroup.system">System</div>
+  <button onclick="showTab('activity', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-activity"/></svg>
+    <span class="nav-label" data-i18n="nav.activity">Activity</span>
+  </button>
+  <button onclick="showTab('settings', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-settings"/></svg>
+    <span class="nav-label" data-i18n="nav.settings">Settings</span>
+  </button>
+  <button onclick="showTab('help', this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-help"/></svg>
+    <span class="nav-label" data-i18n="nav.help">Help</span>
+  </button>
 </nav>
 
 <main>
+
+<div class="nextstep" id="nextstep" style="display:none">
+  <div class="ns-mark" id="ns-mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-arrow" id="ns-icon-use"/></svg>
+  </div>
+  <div class="ns-body">
+    <div class="ns-title" id="ns-title"></div>
+    <div class="ns-copy" id="ns-copy"></div>
+  </div>
+  <button class="btn btn-primary ns-act" id="ns-act" style="display:none"></button>
+</div>
+
 
 <!-- Setup -->
 <div id="setup" class="section active">
@@ -2052,11 +2237,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 </div>
 
 </main>
+</div><!-- /.shell -->
 
 <script>
 let currentTab = 'setup';
 let companyDrill = false;      // true while viewing a single company's contacts
 let _companies = [], _prospects = [], _campaigns = [];
+
+// Shared state behind the header switch and the next-step banner, so both
+// read the same answer rather than each asking separately and disagreeing.
+// null means "we could not reach the server", which is not the same as stopped.
+let agentRunning = null;
+let _setupState = null;        // last /api/setup-status payload
+let _reviewPending = 0;        // outreach waiting on approval
 
 // ── Language ──
 // Only the chrome and the strings this dashboard writes are translated. Data
@@ -2150,6 +2343,21 @@ const I18N = {
     'nav.campaigns': '活动', 'nav.conversations': '对话', 'nav.export': '导出',
     'nav.activity': '动态', 'nav.settings': '设置', 'nav.controls': '控制台',
     'nav.help': '帮助',
+    'navgroup.start': '从这里开始', 'navgroup.run': '日常', 'navgroup.data': '它找到的',
+    'navgroup.system': '系统',
+    'controls.startShort': '启动', 'controls.stopShort': '停止',
+    'ns.setupTitle': '还差 {n} 项才能开始',
+    'ns.setupAction': '去完成',
+    'ns.reviewTitle': '有 {n} 封信等你过目',
+    'ns.reviewCopy': '已经写好了，你批准之前不会发出去。',
+    'ns.reviewAction': '去审核',
+    'ns.startTitle': '准备好了，可以开跑',
+    'ns.startCopy': '启动后它会开始找人、分析、写信，写完的信会回到这里等你批。',
+    'ns.startAction': '启动',
+    'ns.runningTitle': '正在运行',
+    'ns.runningCopy': '它在找人、分析和写信。有需要你过目的，这里会提醒你。',
+    'ns.offlineTitle': '连不上后台',
+    'ns.offlineCopy': '本机服务没有响应。关掉窗口重开一次通常就好了。',
     'briefs.title': '客户分析',
     'briefs.sub': '每个客户是做什么的、为什么匹配、什么会让他们买单、谁拍板。全部是基于已采集证据的推断——请看置信度那一行。',
     'review.title': '审核队列',
@@ -2445,6 +2653,21 @@ const I18N = {
     'nav.campaigns': 'Campaigns', 'nav.conversations': 'Conversations', 'nav.export': 'Export',
     'nav.activity': 'Activity', 'nav.settings': 'Settings', 'nav.controls': 'Controls',
     'nav.help': 'Help',
+    'navgroup.start': 'Get started', 'navgroup.run': 'Day to day',
+    'navgroup.data': 'What it found', 'navgroup.system': 'System',
+    'controls.startShort': 'Start', 'controls.stopShort': 'Stop',
+    'ns.setupTitle': '{n} things left before it can start',
+    'ns.setupAction': 'Finish setup',
+    'ns.reviewTitle': '{n} waiting for you to read',
+    'ns.reviewCopy': 'Written and held. Nothing goes out until you approve it.',
+    'ns.reviewAction': 'Review',
+    'ns.startTitle': 'Ready when you are',
+    'ns.startCopy': 'Start it and it begins finding accounts, analysing them and drafting outreach. Drafts come back here for approval.',
+    'ns.startAction': 'Start',
+    'ns.runningTitle': 'Running',
+    'ns.runningCopy': 'Finding accounts, analysing them and writing. Anything needing you will show up here.',
+    'ns.offlineTitle': 'Cannot reach the server',
+    'ns.offlineCopy': 'The local service stopped answering. Closing and reopening the window usually fixes it.',
     'briefs.title': 'Account briefs',
     'briefs.sub': 'What each account does, why they fit, what would make them buy, and who signs. Every point is a hypothesis over collected evidence — check the confidence line.',
     'review.title': 'Review queue',
@@ -2660,8 +2883,12 @@ const I18N = {
   },
 };
 
-let LANG = 'en';
-try { LANG = localStorage.getItem('ovzLeadsLang') || 'en'; } catch { LANG = 'en'; }
+// Chinese is the default: this ships to a Chinese-speaking audience, and an
+// English first screen makes them hunt for the toggle before they can read
+// anything. A stored choice still wins — someone who picked English keeps it,
+// including on the launch right after they picked it.
+let LANG = 'zh';
+try { LANG = localStorage.getItem('ovzLeadsLang') || 'zh'; } catch { LANG = 'zh'; }
 
 function t(key) {
   const table = I18N[LANG] || I18N.en;
@@ -2700,6 +2927,11 @@ function toggleLang() {
   try { localStorage.setItem('ovzLeadsLang', LANG); } catch {}
   applyLang();
   loadCurrentTab();
+  // These two render from state rather than from a static key, so applyLang()
+  // has just overwritten the header switch with "start" (even mid-run) and
+  // left the banner in the old language.
+  loadAgentStatus();
+  updateNextStep();
 }
 
 // ── Utilities ──
@@ -3127,10 +3359,22 @@ async function loadBriefs() {
 // ── Review queue ──
 
 function updateReviewCount(n) {
+  _reviewPending = n;
   const el = document.getElementById('review-count');
   if (!el) return;
   el.textContent = n > 0 ? String(n) : '';
   el.classList.toggle('on', n > 0);
+  updateNextStep();
+}
+
+// How many required setup steps are still outstanding. Shown on the nav item
+// so an unfinished install is visible from every tab, not just Setup.
+function updateSetupBadge(data) {
+  const el = document.getElementById('setup-count');
+  if (!el) return;
+  const left = (data.total_required || 0) - (data.completed || 0);
+  el.textContent = left > 0 ? String(left) : '';
+  el.className = 'nav-count todo' + (left > 0 ? ' on' : '');
 }
 
 async function loadReview() {
@@ -3253,8 +3497,13 @@ async function loadSetupStatus() {
   if (!data || !data.checks) {
     document.getElementById('setup-progress').innerHTML = '';
     document.getElementById('setup-checklist').innerHTML = offlineState();
+    _setupState = null;
+    updateNextStep();
     return;
   }
+  _setupState = data;
+  updateSetupBadge(data);
+  updateNextStep();
   const pct = data.percent || 0;
   const color = pct === 100 ? 'green' : 'yellow';
 
@@ -3270,12 +3519,6 @@ async function loadSetupStatus() {
   // stable, so the label and help are looked up here and the server's text is
   // the fallback — a check added server-side still renders, untranslated,
   // rather than showing a bare key.
-  const checkText = (c, field) => {
-    const key = 'setup.check.' + c.id + '.' + field;
-    const translated = t(key);
-    return translated === key ? (c[field] || '') : translated;
-  };
-
   const renderCheck = (c, optional) => {
     const icon = c.done
       ? '<span class="check-icon done">&#10003;</span>'
@@ -3494,13 +3737,22 @@ async function loadAgentStatus() {
   const data = await api('/api/agent/status');
   const headerDot = document.getElementById('header-dot');
   const headerText = document.getElementById('header-status-text');
+  const power = document.getElementById('header-power');
 
   if (!data) {
     headerDot.className = 'status-dot offline';
     headerText.textContent = t('status.offline');
+    // The server is unreachable, so neither starting nor stopping can work.
+    agentRunning = null;
+    power.disabled = true;
     return;
   }
   const running = !!data.running;
+  agentRunning = running;
+  power.disabled = false;
+  power.className = 'power-btn' + (running ? ' on' : '');
+  document.getElementById('header-power-label').textContent =
+    running ? t('controls.stopShort') : t('controls.startShort');
 
   headerDot.className = 'status-dot ' + (running ? 'running' : 'stopped');
   headerText.textContent = running ? t('status.running') : t('status.stopped');
@@ -3520,6 +3772,7 @@ async function loadAgentStatus() {
 
   document.getElementById('btn-start').style.display = running ? 'none' : '';
   document.getElementById('btn-stop').style.display = running ? '' : 'none';
+  updateNextStep();
 }
 
 async function startAgent() {
@@ -3779,6 +4032,107 @@ async function refreshReviewBadge() {
   updateReviewCount((byStatus.pending_review || 0) + (byStatus.draft || 0));
 }
 
+// ── The on switch in the header ──
+
+async function togglePower() {
+  if (agentRunning === null) return;   // server unreachable; nothing to toggle
+  const btn = document.getElementById('header-power');
+  btn.disabled = true;
+  // Reuse the Controls handlers so there is exactly one implementation of
+  // starting and stopping, whichever button the user happened to press.
+  if (agentRunning) await stopAgent();
+  else await startAgent();
+  btn.disabled = false;
+}
+
+// ── Next step ──
+//
+// One question — "what do I do now?" — answered from the state already being
+// polled. Order matters: it names the *first* thing standing in the way, not
+// every outstanding thing, because a list of five is the problem it solves.
+
+// The server describes setup checks in English. Ids are stable, so the label
+// and help are translated by id here, falling back to the server's own words
+// so a check added server-side still renders instead of showing a bare key.
+function checkText(c, field) {
+  const key = 'setup.check.' + c.id + '.' + field;
+  const translated = t(key);
+  return translated === key ? (c[field] || '') : translated;
+}
+
+function jumpTo(tab) {
+  const btn = document.querySelector('nav button[onclick*="\'' + tab + '\'"]');
+  if (btn) btn.click();
+}
+
+function nextStepPlan() {
+  // Setup first: nothing downstream can work while a required check fails.
+  if (_setupState && _setupState.checks) {
+    const missing = _setupState.checks.filter(c => c.required && !c.done);
+    if (missing.length) {
+      return {
+        tone: 'wait',
+        title: t('ns.setupTitle').replace('{n}', missing.length),
+        copy: checkText(missing[0], 'label') + ' — ' + checkText(missing[0], 'help'),
+        action: t('ns.setupAction'),
+        run: () => jumpTo('setup'),
+      };
+    }
+  }
+
+  // Then approvals: work is finished and waiting on a person. This outranks
+  // "start the agent" — producing more drafts while some sit unread is not
+  // the more useful thing to do next.
+  if (_reviewPending > 0) {
+    return {
+      tone: 'act',
+      title: t('ns.reviewTitle').replace('{n}', _reviewPending),
+      copy: t('ns.reviewCopy'),
+      action: t('ns.reviewAction'),
+      run: () => jumpTo('review'),
+    };
+  }
+
+  if (agentRunning === null) {
+    return { tone: 'calm', title: t('ns.offlineTitle'), copy: t('ns.offlineCopy') };
+  }
+
+  if (!agentRunning) {
+    return {
+      tone: 'act',
+      title: t('ns.startTitle'),
+      copy: t('ns.startCopy'),
+      action: t('ns.startAction'),
+      run: () => togglePower(),
+    };
+  }
+
+  return { tone: 'calm', title: t('ns.runningTitle'), copy: t('ns.runningCopy') };
+}
+
+function updateNextStep() {
+  const plan = nextStepPlan();
+  const box = document.getElementById('nextstep');
+  if (!box) return;
+
+  box.style.display = '';
+  box.className = 'nextstep' + (plan.tone === 'wait' ? ' wait' : plan.tone === 'calm' ? ' calm' : '');
+  document.getElementById('ns-title').textContent = plan.title;
+  document.getElementById('ns-copy').textContent = plan.copy || '';
+  document.getElementById('ns-icon-use')
+    .setAttribute('href', plan.tone === 'calm' ? '#i-check' : '#i-arrow');
+
+  const act = document.getElementById('ns-act');
+  if (plan.action && plan.run) {
+    act.style.display = '';
+    act.textContent = plan.action;
+    act.onclick = plan.run;
+  } else {
+    act.style.display = 'none';
+    act.onclick = null;
+  }
+}
+
 applyLang();
 loadSetupStatus();
 loadAgentStatus();
@@ -3818,3 +4172,19 @@ def start_dashboard(host: str = "127.0.0.1", port: int = 5555):
     print(f"\n  OpenVZ Leads Dashboard running at http://{host}:{port}")
     print("  Press Ctrl+C to stop.\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def build_server(host: str = "127.0.0.1", port: int = 5555):
+    """A server object the caller can run wherever it likes.
+
+    `uvicorn.run` installs signal handlers, and Python only allows that on the
+    main thread. The desktop window needs the main thread for itself (a macOS
+    rule, not ours), so the server has to run in a worker — which means asking
+    uvicorn not to touch signals.
+    """
+    import uvicorn
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    server.install_signal_handlers = False
+    return server
