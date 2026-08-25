@@ -35,6 +35,9 @@ VERSION = re.search(
 datas = [
     ('prompts', 'prompts'),
     ('skills', 'skills'),
+    # The dashboard page. Not seeded into the workspace like prompts/ and
+    # skills/ — it is code, and a stale copy would outlive the API it calls.
+    ('openvz_leads/static', 'openvz_leads/static'),
     ('openvz-leads.yaml', '.'),
     ('.env.example', '.'),
     ('README.md', '.'),

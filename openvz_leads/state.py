@@ -1140,6 +1140,78 @@ class StateManager:
             await db.commit()
             return cursor.rowcount > 0
 
+    async def edit_pending_sequence(
+        self, campaign_id: str, sequence: list[dict]
+    ) -> list[dict] | None:
+        """Replace the copy of a campaign that is still awaiting review.
+
+        A reviewer who spots one wrong sentence should be able to fix it,
+        not have to reject a whole three-email sequence and wait for the
+        Writer to try again.
+
+        Guarded the same way ``review_campaign`` is — only ``draft`` and
+        ``pending_review`` can be edited. Once a campaign is approved its
+        copy is what a person signed off on, and once it is active the copy
+        may already be in someone's inbox; letting either be rewritten
+        afterwards would mean the record no longer says what was sent.
+
+        Only ``subject``, ``body`` and ``delay_days`` are taken from the
+        caller. The step numbering and the length of the sequence come from
+        what is already stored, so an edit cannot add a fourth email nobody
+        reviewed or renumber the send schedule out from under the outbox.
+
+        Returns the stored sequence, or None if the campaign was not open
+        for editing.
+        """
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT sequence_json FROM campaigns
+                   WHERE id = ? AND status IN ('draft', 'pending_review')""",
+                (campaign_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return None
+
+            try:
+                current = json.loads(row["sequence_json"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                current = []
+            if not isinstance(current, list):
+                current = []
+
+            edits = {}
+            for item in sequence or []:
+                if isinstance(item, dict) and item.get("step") is not None:
+                    edits[str(item["step"])] = item
+
+            merged = []
+            for index, step in enumerate(current):
+                step = dict(step) if isinstance(step, dict) else {}
+                edit = edits.get(str(step.get("step", index + 1)))
+                if edit:
+                    if "subject" in edit:
+                        step["subject"] = str(edit["subject"] or "").strip()
+                    if "body" in edit:
+                        step["body"] = str(edit["body"] or "").strip()
+                    if "delay_days" in edit:
+                        try:
+                            # A negative delay would schedule a follow-up
+                            # before the email it follows up on.
+                            step["delay_days"] = max(0, int(edit["delay_days"]))
+                        except (TypeError, ValueError):
+                            pass
+                merged.append(step)
+
+            cursor = await db.execute(
+                """UPDATE campaigns SET sequence_json = ?
+                   WHERE id = ? AND status IN ('draft', 'pending_review')""",
+                (json.dumps(merged, ensure_ascii=False), campaign_id),
+            )
+            await db.commit()
+            return merged if cursor.rowcount > 0 else None
+
     async def update_campaign(self, campaign_id: str, **kwargs):
         """Update whitelisted campaign columns in a single atomic statement."""
         if not kwargs:
