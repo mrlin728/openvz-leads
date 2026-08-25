@@ -120,7 +120,8 @@ leaving the rest of the file, comments included, exactly as it was.
 
 ```bash
 openvz-leads run          # heartbeat: find → analyse → draft → queue for review
-openvz-leads dashboard    # http://localhost:5555
+openvz-leads dashboard    # http://localhost:5555 in your browser
+                          # (the installed app opens its own window instead)
 openvz-leads stage        # where everyone is in the pipeline
 openvz-leads gmail login  # only if sending from your own mailbox
 openvz-leads gmail preview        # print the next message, send nothing

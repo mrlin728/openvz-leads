@@ -152,6 +152,17 @@ openvz-leads dashboard    # http://localhost:5555
 ## Technical Reference
 
 ### Architecture
+- **Desktop app** (`app.py`): what the `.app`/`.exe` runs. Widens PATH (a GUI
+  process inherits launchd's, not the shell's), seeds the workspace, starts the
+  server on a background thread and shows it in a **window of its own** via
+  pywebview — the OS web view, so no second browser engine is bundled. The
+  window needs the main thread, which is why the server uses
+  `dashboard.build_server()` rather than `uvicorn.run` (that installs signal
+  handlers, and only the main thread may). Missing pywebview or no display
+  falls back to opening a browser tab, so nothing that worked before stops
+  working. `OPENVZ_LEADS_NO_WINDOW=1` serves headless — used by both release
+  smoke tests, because a CI runner has no desktop and the browser fallback
+  makes the check depend on how a headless box handles `webbrowser.open`
 - **Heartbeat** (`main.py`): quiet hours → budget → decide → act → log → sleep
 - **Brain** (`brain.py`): the one place a model is called. `claude_cli` (default) shells out to `claude -p --dangerously-skip-permissions`; `openai`/`deepseek`/`openai_compatible` go over HTTP. Retries, timeouts, skills injection. Agents talk to the Brain, never to a provider
 - **ICP** (`icp.py`): a sentence → an `ICPDraft`, plus the assumptions behind it. Writes back by replacing the `icp:` block textually, never by re-dumping the YAML — that would strip every comment in the file
@@ -160,6 +171,32 @@ openvz-leads dashboard    # http://localhost:5555
 - **CRM** (`integrations/crm.py`): stage changes as events, pushed to a webhook or a file. Documented payload, ordered delivery, retry on transient failure
 - **State** (`state.py`): SQLite (WAL) at `data/leads.db`. Schema changes go through the linear `MIGRATIONS` list tracked by `PRAGMA user_version` — **append, never edit a released migration**
 - **Skills** (`skills/`) and **prompts** (`prompts/`): markdown injected into agent prompts
+
+### The dashboard's shape
+Fourteen destinations, grouped down a sidebar rather than spread across one
+flat row: **Get started** (Setup, Target) → **Day to day** (Overview, Review,
+Conversations, Controls) → **What it found** (Companies, Contacts, Account
+briefs, Campaigns, Export) → **System** (Activity, Settings, Help). The
+grouping carries the order of the work; keep a new tab in the group that
+matches when it is used, not where it fits alphabetically.
+
+Two things exist to answer "what do I do now?", and both should survive edits:
+
+- **The next-step banner** (`nextStepPlan()`) names the *first* thing standing
+  in the way and nothing else — required setup, then drafts awaiting approval,
+  then starting the agent. Approvals outrank starting on purpose: making more
+  drafts while some sit unread is not the more useful next move. A list of
+  five "next steps" is the problem it was built to solve, so do not add a
+  second banner or make it enumerate.
+- **The header power switch** starts and stops the agent from every tab. It
+  calls the same `startAgent`/`stopAgent` as the Controls tab — one
+  implementation, two buttons. `agentRunning === null` means the server is
+  unreachable, which is not the same as stopped, and the switch disables
+  itself rather than guessing.
+
+Setup-check labels arrive from the server in English and are translated by
+check id via `checkText()`. Anything showing a check's text must go through
+it, or that string ships untranslated while everything around it is Chinese.
 
 ### Agents
 - **Scout** — Python does the searching; Claude only scores and personalises what was found

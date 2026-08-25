@@ -81,7 +81,8 @@ echo "==> Smoke-testing the frozen app"
 SMOKE_HOME="$(mktemp -d)"
 trap 'rm -rf "$SMOKE_HOME"' EXIT
 
-OPENVZ_LEADS_HOME="$SMOKE_HOME" "${APP_PATH}/Contents/MacOS/${APP_NAME}" \
+OPENVZ_LEADS_HOME="$SMOKE_HOME" OPENVZ_LEADS_NO_WINDOW=1 \
+  "${APP_PATH}/Contents/MacOS/${APP_NAME}" \
   > "${SMOKE_HOME}/stdout.log" 2>&1 &
 APP_PID=$!
 

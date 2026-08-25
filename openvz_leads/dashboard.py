@@ -1476,3 +1476,19 @@ def start_dashboard(host: str = "127.0.0.1", port: int = 5555):
     print(f"\n  OpenVZ Leads Dashboard running at http://{host}:{port}")
     print("  Press Ctrl+C to stop.\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def build_server(host: str = "127.0.0.1", port: int = 5555):
+    """A server object the caller can run wherever it likes.
+
+    `uvicorn.run` installs signal handlers, and Python only allows that on the
+    main thread. The desktop window needs the main thread for itself (a macOS
+    rule, not ours), so the server has to run in a worker — which means asking
+    uvicorn not to touch signals.
+    """
+    import uvicorn
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    server.install_signal_handlers = False
+    return server

@@ -49,7 +49,16 @@ hiddenimports = [
     'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
     'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on',
     'aiosqlite', 'dns.resolver', 'aiosmtplib',
-]
+    # pywebview picks its GUI backend at runtime, so nothing imports these by
+    # name for PyInstaller to follow. Left out, the frozen app starts, finds
+    # no backend, and quietly falls back to a browser tab — the exact thing
+    # the window was added to stop.
+    'webview',
+] + (
+    ['webview.platforms.cocoa', 'objc', 'Foundation', 'AppKit', 'WebKit']
+    if IS_MAC else
+    ['webview.platforms.edgechromium', 'clr', 'System.Windows.Forms']
+)
 
 a = Analysis(
     ['openvz_leads/app.py'],

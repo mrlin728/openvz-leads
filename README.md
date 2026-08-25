@@ -117,7 +117,8 @@ openvz-leads target "帮我找美国牙科诊所"
 
 ```bash
 openvz-leads run          # 心跳循环：找 → 分析 → 写 → 排队等你审
-openvz-leads dashboard    # 浏览器打开 http://localhost:5555
+openvz-leads dashboard    # 在浏览器打开 http://localhost:5555
+                          # （装机版是双击图标，自带独立窗口，不走浏览器）
 openvz-leads stage        # 看每个人现在在哪一步
 openvz-leads gmail login  # 只有要用自己邮箱发信时才需要
 openvz-leads gmail preview   # 打印下一封会发出去的信，不发

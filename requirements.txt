@@ -14,6 +14,11 @@ pytz>=2024.1
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
 
+# pywebview is in pyproject but deliberately NOT here. It is the desktop
+# window, and this file feeds the Docker image, which runs openvz_leads.main
+# headless and never opens one. Installing it there would pull a GUI toolkit
+# into a container that has no display to draw on.
+
 # Optional page-reading tiers. Uncomment, or install the extras:
 #   pip install "openvz-leads[crawl]"    # crawl4ai — JS rendering, Markdown
 #   pip install "openvz-leads[browser]"  # browser-use — a real browser
